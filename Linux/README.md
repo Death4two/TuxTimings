@@ -15,7 +15,7 @@
 From the `Linux/` directory:
 
 ```bash
-dotnet run --project TuxTimings.LinuxUI
+sudo dotnet run --project TuxTimings.LinuxUI
 ```
 
 For a self-contained publish (no system .NET needed to run):
