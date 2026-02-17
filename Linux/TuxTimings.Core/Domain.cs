@@ -15,12 +15,50 @@ public sealed class MemoryModule
 {
     public string BankLabel { get; init; } = string.Empty;
     public string PartNumber { get; init; } = string.Empty;
+    public string SerialNumber { get; init; } = string.Empty;
     public string Manufacturer { get; init; } = string.Empty;
     public string DeviceLocator { get; init; } = string.Empty;
     public ulong CapacityBytes { get; init; }
     public uint ClockSpeedMHz { get; init; }
     public MemRank Rank { get; init; }
-    public string Slot { get; init; } = string.Empty;
+
+    /// <summary>Capacity for display (e.g. "16.0 GiB").</summary>
+    public string CapacityDisplay
+    {
+        get
+        {
+            if (CapacityBytes == 0) return "—";
+            double gib = CapacityBytes / (1024.0 * 1024.0 * 1024.0);
+            return $"{gib:F1} GiB";
+        }
+    }
+
+    /// <summary>ZenTimings-style slot label from Bank Locator + Locator (e.g. "A1", "B1", "A2", "B2").</summary>
+    public string SlotLabel
+    {
+        get
+        {
+            var channel = string.IsNullOrEmpty(BankLabel) ? null
+                : BankLabel.Contains("CHANNEL B", StringComparison.OrdinalIgnoreCase) ? "B"
+                : BankLabel.Contains("CHANNEL A", StringComparison.OrdinalIgnoreCase) ? "A"
+                : null;
+            var slot = string.IsNullOrEmpty(DeviceLocator)
+                ? null
+                : System.Text.RegularExpressions.Regex.Match(DeviceLocator, @"\d+").Value;
+            if (!string.IsNullOrEmpty(channel) && !string.IsNullOrEmpty(slot)) return $"{channel}{slot}";
+            return string.IsNullOrEmpty(DeviceLocator) ? string.Empty : DeviceLocator;
+        }
+    }
+
+    /// <summary>Label for DIMM dropdown (e.g. "A1 - 16.0 GiB" or "DIMM 1 - 16.0 GiB").</summary>
+    public string SlotDisplay
+    {
+        get
+        {
+            var label = !string.IsNullOrEmpty(SlotLabel) && SlotLabel.Length <= 4 ? SlotLabel : DeviceLocator;
+            return string.IsNullOrEmpty(label) ? CapacityDisplay : $"{label} - {CapacityDisplay}";
+        }
+    }
 }
 
 public enum MemType
@@ -55,6 +93,9 @@ public sealed class MemoryConfigModel : INotifyPropertyChanged
 
     public string TotalCapacity { get; set; } = string.Empty;
 
+    /// <summary>RAM manufacturer(s) from dmidecode -t 17 Manufacturer (e.g. G Skill Intl).</summary>
+    public string Manufacturer { get; set; } = string.Empty;
+
     /// <summary>RAM part number(s) from dmidecode -t memory (e.g. F5-7600J3646G16G).</summary>
     public string PartNumber { get; set; } = string.Empty;
 
@@ -70,7 +111,6 @@ public sealed class CpuInfoModel
     /// <summary>ProcessorName when available, otherwise Name.</summary>
     public string DisplayName => !string.IsNullOrEmpty(ProcessorName) ? ProcessorName : Name;
     public string CodeName { get; init; } = string.Empty;
-    public string Package { get; init; } = string.Empty;
     public string SmuVersion { get; init; } = string.Empty;
     /// <summary>PM table version from ryzen_smu (e.g. 0x620105) or empty when unavailable.</summary>
     public string PmTableVersion { get; init; } = string.Empty;
@@ -79,31 +119,30 @@ public sealed class CpuInfoModel
 public sealed class SmuMetrics
 {
     public float CpuPackagePowerWatts { get; init; }
+    /// <summary>CPU PPT (Package Power Tracking) in watts.</summary>
+    public float CpuPptWatts { get; init; }
+    /// <summary>Package current in amps (from zenpower or PM table when available).</summary>
+    public float CpuPackageCurrentAmps { get; init; }
+    /// <summary>Core voltage (V) from PM table when available. 0 if unavailable.</summary>
+    public float Vcore { get; init; }
     public float CpuTempCelsius { get; init; }
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-=======
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-    /// <summary>Per-core/CCD temperatures °C. Primary: PM table indices 317–324 (up to 8). Fallback: k10temp/zenpower CCD temps.</summary>
+    /// <summary>Per-core/CCD temperatures °C (PM table or hwmon).</summary>
     public IReadOnlyList<float> CoreTempsCelsius { get; init; } = Array.Empty<float>();
-    /// <summary>Per-physical-core usage percent (0–100) derived from /proc/stat; cores are SMT pairs averaged.</summary>
+    /// <summary>Per-physical-core usage percent (0–100) derived from /proc/stat.</summary>
     public IReadOnlyList<float> CoreUsagePercent { get; init; } = Array.Empty<float>();
-    /// <summary>Per-physical-core effective frequency in MHz from cpufreq (scaling_cur_freq), averaged across SMT threads.</summary>
+    /// <summary>Per-physical-core effective frequency in MHz from cpufreq, averaged across SMT threads.</summary>
     public IReadOnlyList<float> CoreFreqMHz { get; init; } = Array.Empty<float>();
     /// <summary>Tdie from PM table or zenpower/k10temp (°C). Null when unavailable.</summary>
     public float? TdieCelsius { get; init; }
     /// <summary>Tctl from k10temp or zenpower (°C). Null when unavailable.</summary>
     public float? TctlCelsius { get; init; }
-    /// <summary>Tccd1 from k10temp temp3_input (°C). Null if k10temp does not expose it.</summary>
+    /// <summary>Tccd1 from k10temp temp3_input (°C) or PM table. Null when unavailable.</summary>
     public float? Tccd1Celsius { get; init; }
-    /// <summary>Tccd2 from k10temp temp4_input (°C). Null if k10temp does not expose it.</summary>
+    /// <summary>Tccd2 from k10temp temp4_input (°C) or PM table. Null when unavailable.</summary>
     public float? Tccd2Celsius { get; init; }
->>>>>>> Stashed changes
     public float CoreClockMHz { get; init; }
+    /// <summary>Per-core clocks in GHz from PM table (when exposed).</summary>
+    public IReadOnlyList<float> CoreClocksGhz { get; init; } = Array.Empty<float>();
     public float MemoryClockMHz { get; init; }
     public float FclkMHz { get; init; }
     public float UclkMHz { get; init; }
@@ -125,7 +164,10 @@ public sealed class DramTimingsModel
 {
     // Primary timings
     public uint Tcl { get; init; }
+    /// <summary>Combined Trcd timing when only a single value is available (DDR4 generic path).</summary>
     public uint Trcd { get; init; }
+    public uint TrcdRd { get; init; }
+    public uint TrcdWr { get; init; }
     public uint Trp { get; init; }
     public uint Tras { get; init; }
     public uint Trc { get; init; }
@@ -163,6 +205,8 @@ public sealed class DramTimingsModel
     public uint PhyWrd { get; init; }
     public uint PhyWrl { get; init; }
     public uint PhyRdl { get; init; }
+    /// <summary>tPHYRDL per channel/UMC (index 0 = UMC0, 1 = UMC1). Use for per-DIMM display.</summary>
+    public IReadOnlyList<uint> PhyRdlPerChannel { get; init; } = Array.Empty<uint>();
     public uint Refi { get; init; }
     public uint Wrpre { get; init; }
     public uint Rdpre { get; init; }
@@ -183,6 +227,9 @@ public sealed class DramTimingsModel
     // timings were derived (useful for DDR5 where ratio is encoded).
     public float FrequencyHintMHz { get; init; }
 }
+
+/// <summary>Single fan reading from hwmon (e.g. NCT6799); Label is "Fan1".."Fan6" or "Pump" for fan7.</summary>
+public sealed record FanReading(string Label, int Rpm);
 
 /// <summary>Board and BIOS info from dmidecode -s baseboard-product-name / bios-version / bios-release-date.</summary>
 public sealed class BoardInfoModel
@@ -223,6 +270,7 @@ public sealed class SystemSummary
     public IReadOnlyList<MemoryModule> Modules { get; init; } = Array.Empty<MemoryModule>();
     public SmuMetrics Metrics { get; init; } = new();
     public DramTimingsModel DramTimings { get; init; } = new();
+    public IReadOnlyList<FanReading> Fans { get; init; } = Array.Empty<FanReading>();
 }
 
 public interface IHardwareBackend
@@ -231,3 +279,4 @@ public interface IHardwareBackend
 
     SystemSummary ReadSummary();
 }
+

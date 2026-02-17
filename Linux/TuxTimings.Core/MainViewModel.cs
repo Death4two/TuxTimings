@@ -14,20 +14,34 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public event PropertyChangedEventHandler? PropertyChanged;
 
     private SystemSummary _summary = new();
+    // Cached Modules list reference — only updated when the actual list changes
+    // so the ComboBox doesn't reset its selection on every refresh.
+    private IReadOnlyList<MemoryModule> _cachedModules = Array.Empty<MemoryModule>();
+
     public SystemSummary Summary
     {
         get => _summary;
         private set
         {
+            var prevModulesRef = _summary.Modules;
             _summary = value;
             OnPropertyChanged();
-<<<<<<< Updated upstream
-        }
-    }
 
-=======
-            OnPropertyChanged(nameof(Modules));
-            OnPropertyChanged(nameof(SelectedModuleIndex));
+            // Only fire Modules change when the list reference actually changed (first read).
+            var newModules = value.Modules ?? Array.Empty<MemoryModule>();
+            if (!ReferenceEquals(prevModulesRef, newModules) && newModules.Count > 0)
+            {
+                _cachedModules = newModules;
+                OnPropertyChanged(nameof(Modules));
+            }
+
+            // Auto-select first module if nothing is selected yet but modules exist.
+            if (_selectedModuleIndex < 0 && _cachedModules.Count > 0)
+            {
+                _selectedModuleIndex = 0;
+                OnPropertyChanged(nameof(SelectedModuleIndex));
+            }
+
             OnPropertyChanged(nameof(SelectedModuleCapacity));
             OnPropertyChanged(nameof(SelectedModuleManufacturer));
             OnPropertyChanged(nameof(SelectedModulePartNumber));
@@ -38,15 +52,13 @@ public sealed class MainViewModel : INotifyPropertyChanged
             OnPropertyChanged(nameof(CoreTempsDisplay));
             OnPropertyChanged(nameof(TctlTccdDisplay));
             OnPropertyChanged(nameof(SelectedSpdTempDisplay));
-            OnPropertyChanged(nameof(SpdTempsDisplay));
             OnPropertyChanged(nameof(FanDisplayLines));
             OnPropertyChanged(nameof(PumpDisplay));
             OnPropertyChanged(nameof(BclkMHz));
         }
     }
-
     /// <summary>Installed DIMMs from dmidecode -t 17 for dropdown.</summary>
-    public IReadOnlyList<MemoryModule> Modules => Summary.Modules ?? Array.Empty<MemoryModule>();
+    public IReadOnlyList<MemoryModule> Modules => _cachedModules;
 
     private int _selectedModuleIndex = -1;
     private string _selectedPhyRdlDisplay = "—";
@@ -56,8 +68,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         get => _selectedModuleIndex;
         set
         {
-            var modules = Summary.Modules ?? Array.Empty<MemoryModule>();
-            var clamped = value < 0 ? -1 : (value >= modules.Count ? (modules.Count > 0 ? modules.Count - 1 : -1) : value);
+            var clamped = value < 0 ? -1 : (value >= _cachedModules.Count ? (_cachedModules.Count > 0 ? _cachedModules.Count - 1 : -1) : value);
             if (_selectedModuleIndex == clamped) return;
             _selectedModuleIndex = clamped;
             OnPropertyChanged();
@@ -156,14 +167,28 @@ public sealed class MainViewModel : INotifyPropertyChanged
     {
         get
         {
-            var modules = Summary.Modules ?? Array.Empty<MemoryModule>();
-            if (_selectedModuleIndex < 0 || _selectedModuleIndex >= modules.Count) return null;
-            return modules[_selectedModuleIndex];
+            if (_selectedModuleIndex < 0 || _selectedModuleIndex >= _cachedModules.Count) return null;
+            return _cachedModules[_selectedModuleIndex];
         }
     }
 
-    /// <summary>BCLK in MHz (CoreClockMHz / 10 for display).</summary>
-    public float BclkMHz => Summary.Metrics.CoreClockMHz / 10f;
+    /// <summary>BCLK in MHz. AM5 Ryzen uses 100 MHz reference clock; derive from FCLK when available.</summary>
+    public float BclkMHz
+    {
+        get
+        {
+            // BCLK = reference clock. For AM5 Ryzen, 100 MHz is the standard value.
+            // If FCLK is available, derive BCLK = FCLK / round(FCLK/100) to detect BCLK OC.
+            var fclk = Summary.Metrics.FclkMHz;
+            if (fclk > 0)
+            {
+                float ratio = MathF.Round(fclk / 100f);
+                if (ratio >= 1f)
+                    return fclk / ratio;
+            }
+            return 100.0f;
+        }
+    }
 
     private bool IsPerCoreTempsSupportedCpu
     {
@@ -245,30 +270,13 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
     }
 
-    /// <summary>SPD (DIMM) temperatures for UI: "SPD1:33°C  SPD2:30°C" or "—".</summary>
-    public string SpdTempsDisplay
-    {
-        get
-        {
-            var temps = Summary.Metrics.SpdTempsCelsius ?? Array.Empty<float>();
-            if (temps.Count == 0) return "—";
-            var parts = new List<string>(temps.Count);
-            for (int i = 0; i < temps.Count; i++)
-            {
-                parts.Add($"SPD{i + 1}:{temps[i]:F0}°C");
-            }
-            return string.Join("  ", parts);
-        }
-    }
-
     /// <summary>SPD temp for the currently selected DIMM, or "—".</summary>
     public string SelectedSpdTempDisplay
     {
         get
         {
             var temps = Summary.Metrics.SpdTempsCelsius ?? Array.Empty<float>();
-            var modules = Summary.Modules ?? Array.Empty<MemoryModule>();
-            if (temps.Count == 0 || modules.Count == 0) return "—";
+            if (temps.Count == 0 || _cachedModules.Count == 0) return "—";
             var idx = _selectedModuleIndex;
             if (idx < 0 || idx >= temps.Count) return "—";
             return $"{temps[idx]:F0}°C";
@@ -303,8 +311,6 @@ public sealed class MainViewModel : INotifyPropertyChanged
     /// <summary>Pump RPM or "—" if no pump.</summary>
     public string PumpDisplay =>
         Summary.Fans?.FirstOrDefault(f => f.Label == "Pump") is { } p ? $"{p.Rpm} RPM" : "—";
-
->>>>>>> Stashed changes
     public string AppVersion { get; } =
         Assembly.GetExecutingAssembly()
             .GetName()

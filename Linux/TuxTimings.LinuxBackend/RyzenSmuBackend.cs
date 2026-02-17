@@ -15,6 +15,11 @@ public sealed class RyzenSmuBackend : IHardwareBackend
     // Values are (IdleJiffies, TotalJiffies).
     private readonly Dictionary<int, (ulong Idle, ulong Total)> _prevCpuTimes = new();
 
+    // Cached static data: these don't change between refreshes so we only read them once.
+    private IReadOnlyList<MemoryModule>? _cachedModules;
+    private (string ProcessorName, string PartNumbers, string MotherboardProductName, string BiosVersion, string BiosReleaseDate)? _cachedDmidecode;
+    private string? _cachedAgesaVersion;
+
     /// <summary>
     /// Fallback: use Python script (same logic as dump_pm_voltages.py) to parse PM table.
     /// Python reads sysfs successfully when C# may throw; script outputs key=value.
@@ -72,6 +77,8 @@ public sealed class RyzenSmuBackend : IHardwareBackend
 
             if (values.Count == 0) return null;
 
+            // This Python fallback is only used when direct PM-table parsing fails.
+            // We currently only surface aggregate clocks/voltages/temps here.
             return new SmuMetrics
             {
                 FclkMHz = values.GetValueOrDefault("FCLK"),
@@ -81,29 +88,19 @@ public sealed class RyzenSmuBackend : IHardwareBackend
                 Vddp = values.GetValueOrDefault("VDDP"),
                 VddgIod = values.GetValueOrDefault("VDDG_IOD"),
                 VddgCcd = values.GetValueOrDefault("VDDG_CCD"),
-<<<<<<< Updated upstream
-                VddMisc = values.GetValueOrDefault("VDD_MISC")
-=======
                 VddMisc = values.GetValueOrDefault("VDD_MISC"),
                 Vcore = PlausibleVcore(values.GetValueOrDefault("VCORE")),
                 CpuPackagePowerWatts = values.GetValueOrDefault("POWER"),
                 CpuPptWatts = values.GetValueOrDefault("PPT"),
                 CpuPackageCurrentAmps = values.GetValueOrDefault("CURRENT"),
                 CpuTempCelsius = values.GetValueOrDefault("TEMP"),
-                CoreTempsCelsius = coreTemps,
+                CoreTempsCelsius = Array.Empty<float>(),
                 CoreClockMHz = values.GetValueOrDefault("CORE_MHZ"),
                 // Tdie/Tctl/Tccd will be overlaid later from k10temp/zenpower.
                 TdieCelsius = null,
                 TctlCelsius = null,
                 Tccd1Celsius = null,
                 Tccd2Celsius = null
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
             };
         }
         catch
@@ -211,7 +208,10 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
 
     public SystemSummary ReadSummary()
     {
-        var (processorName, partNumbers, motherboardProductName, biosVersion, biosReleaseDate) = ReadDmidecode();
+        // Cache static data (dmidecode, modules, AGESA) — only read once.
+        _cachedDmidecode ??= ReadDmidecode();
+        var (processorName, partNumbers, motherboardProductName, biosVersion, biosReleaseDate) = _cachedDmidecode.Value;
+
         var codenameIndex = ReadCodenameIndex();
         var pmVersion = ReadUInt32("pm_table_version");
         var pmVersionDisplay = pmVersion == 0 ? string.Empty : $"PM table 0x{pmVersion:X8}";
@@ -222,12 +222,11 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
             ProcessorName = processorName,
             CodeName = MapCodename(codenameIndex),
             SmuVersion = ReadString("version"),
-            Package = string.Empty,
             PmTableVersion = pmVersionDisplay
         };
 
+        // Dynamic data: re-read every refresh.
         var metrics = ReadMetrics(codenameIndex);
-
         var dramTimings = ReadDramTimingsForCodename(codenameIndex);
         var (memFreqMHz, memType) = GetMemoryConfigForCodename(codenameIndex, dramTimings);
 
@@ -239,33 +238,31 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
             PartNumber = partNumbers
         };
 
+        _cachedAgesaVersion ??= ReadAgesaVersion();
         var boardInfo = new BoardInfoModel
         {
             MotherboardProductName = motherboardProductName,
             BiosVersion = biosVersion,
             BiosReleaseDate = biosReleaseDate,
-            AgesaVersion = ReadAgesaVersion()
+            AgesaVersion = _cachedAgesaVersion
         };
+
+        // Modules are static — only read once.
+        _cachedModules ??= ReadMemoryModules();
+        var fans = ReadHwmonFans();
 
         return new SystemSummary
         {
             Cpu = cpu,
             Memory = memory,
             BoardInfo = boardInfo,
-            Modules = Array.Empty<MemoryModule>(),
+            Modules = _cachedModules,
             Metrics = metrics,
-            DramTimings = dramTimings
+            DramTimings = dramTimings,
+            Fans = fans
         };
     }
 
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-=======
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
     /// <summary>
     /// Read fan1–fan7 from Nuvoton Super I/O hwmon devices (e.g. nct6799, nct6798, nct6775, etc.); fan7 = Pump; exclude 0 RPM.
     /// Matches any hwmon "name" that looks like an NCT67xx/NCT67xx-family or contains "nuvoton".
@@ -288,7 +285,6 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
 
                 // Typical names: "nct6799", "nct6798", "nct6775", etc., sometimes with suffixes.
                 bool isNuvoton = name.StartsWith("nct6", StringComparison.OrdinalIgnoreCase)
-                                 || name.StartsWith("nct67", StringComparison.OrdinalIgnoreCase)
                                  || name.Contains("nuvoton", StringComparison.OrdinalIgnoreCase);
                 if (!isNuvoton) continue;
 
@@ -316,8 +312,6 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
 
         return result;
     }
-
->>>>>>> Stashed changes
     private static string ReadString(string fileName)
     {
         var path = Path.Combine(BasePath, fileName);
@@ -435,9 +429,6 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
         return string.Empty;
     }
 
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
     private static string ParseMemory(string stdout)
     {
         var partNumbers = new List<string>();
@@ -462,16 +453,158 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
         return string.Join("\n", partNumbers);
     }
 
-    private static SmuMetrics ReadMetrics(int codenameIndex)
-=======
+    /// <summary>
+    /// Parse dmidecode -t memory to build a list of populated MemoryModule objects.
+    /// Each "Memory Device" block that has a non-zero Size is considered a populated DIMM slot.
+    /// </summary>
+    private static IReadOnlyList<MemoryModule> ReadMemoryModules()
+    {
+        try
+        {
+            using var proc = new Process
+            {
+                StartInfo = new ProcessStartInfo
+                {
+                    FileName = "dmidecode",
+                    Arguments = "-t memory",
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                }
+            };
+            proc.Start();
+            var stdout = proc.StandardOutput.ReadToEnd();
+            proc.WaitForExit(5000);
+            if (proc.ExitCode != 0) return Array.Empty<MemoryModule>();
+
+            var modules = new List<MemoryModule>();
+            string bankLabel = "", locator = "", manufacturer = "", partNumber = "", serialNumber = "";
+            ulong capacityBytes = 0;
+            uint clockMHz = 0;
+            int rank = 0;
+            bool inDevice = false;
+
+            foreach (var rawLine in stdout.Split('\n'))
+            {
+                var line = rawLine.TrimEnd();
+
+                if (line.Contains("Memory Device", StringComparison.OrdinalIgnoreCase) && !line.Contains("Mapped", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Save previous device if populated
+                    if (inDevice && capacityBytes > 0)
+                    {
+                        modules.Add(BuildModule(bankLabel, locator, manufacturer, partNumber, serialNumber, capacityBytes, clockMHz, rank));
+                    }
+                    // Reset for new device
+                    inDevice = true;
+                    bankLabel = locator = manufacturer = partNumber = serialNumber = "";
+                    capacityBytes = 0;
+                    clockMHz = 0;
+                    rank = 0;
+                    continue;
+                }
+
+                if (!inDevice) continue;
+
+                var trimmed = line.TrimStart();
+                var colonIdx = trimmed.IndexOf(':', StringComparison.Ordinal);
+                if (colonIdx < 0) continue;
+                var key = trimmed[..colonIdx].Trim();
+                var val = trimmed[(colonIdx + 1)..].Trim();
+
+                switch (key)
+                {
+                    case "Size":
+                        capacityBytes = ParseCapacity(val);
+                        break;
+                    case "Locator":
+                        locator = val;
+                        break;
+                    case "Bank Locator":
+                        bankLabel = val;
+                        break;
+                    case "Manufacturer":
+                        if (val != "Unknown" && val != "Not Specified")
+                            manufacturer = val;
+                        break;
+                    case "Part Number":
+                        if (val != "Unknown" && val != "NO DIMM" && val != "Not Specified")
+                            partNumber = val;
+                        break;
+                    case "Serial Number":
+                        if (val != "Unknown" && val != "Not Specified" && val != "00000000")
+                            serialNumber = val;
+                        break;
+                    case "Rank":
+                        int.TryParse(val, out rank);
+                        break;
+                    case "Configured Memory Speed" or "Configured Clock Speed":
+                        // e.g. "3300 MT/s" or "3300 MHz"
+                        var parts = val.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                        if (parts.Length > 0 && uint.TryParse(parts[0], out var mhz))
+                            clockMHz = mhz;
+                        break;
+                }
+            }
+
+            // Don't forget the last device
+            if (inDevice && capacityBytes > 0)
+            {
+                modules.Add(BuildModule(bankLabel, locator, manufacturer, partNumber, serialNumber, capacityBytes, clockMHz, rank));
+            }
+
+            return modules;
+        }
+        catch
+        {
+            return Array.Empty<MemoryModule>();
+        }
+    }
+
+    private static MemoryModule BuildModule(string bankLabel, string locator, string manufacturer,
+        string partNumber, string serialNumber, ulong capacityBytes, uint clockMHz, int rank)
+    {
+        return new MemoryModule
+        {
+            BankLabel = bankLabel,
+            DeviceLocator = locator,
+            Manufacturer = manufacturer,
+            PartNumber = partNumber,
+            SerialNumber = serialNumber,
+            CapacityBytes = capacityBytes,
+            ClockSpeedMHz = clockMHz,
+            Rank = rank switch
+            {
+                4 => MemRank.QR,
+                2 => MemRank.DR,
+                _ => MemRank.SR
+            }
+        };
+    }
+
+    /// <summary>Parse dmidecode Size field: "16 GB", "8192 MB", "No Module Installed", etc.</summary>
+    private static ulong ParseCapacity(string val)
+    {
+        if (string.IsNullOrEmpty(val)) return 0;
+        if (val.Contains("No Module", StringComparison.OrdinalIgnoreCase)
+            || val.Contains("Not Installed", StringComparison.OrdinalIgnoreCase))
+            return 0;
+
+        var parts = val.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length < 2 || !ulong.TryParse(parts[0], out var size)) return 0;
+
+        var unit = parts[1].ToUpperInvariant();
+        return unit switch
+        {
+            "GB" or "GIB" => size * 1024UL * 1024UL * 1024UL,
+            "MB" or "MIB" => size * 1024UL * 1024UL,
+            "KB" or "KIB" => size * 1024UL,
+            _ => size
+        };
+    }
+
     private SmuMetrics ReadMetrics(int codenameIndex)
->>>>>>> Stashed changes
-=======
-    private SmuMetrics ReadMetrics(int codenameIndex)
->>>>>>> Stashed changes
-=======
-    private SmuMetrics ReadMetrics(int codenameIndex)
->>>>>>> Stashed changes
     {
         // Best-effort: if pm_table is present, read a few floats from it.
         var pmTablePath = Path.Combine(BasePath, "pm_table");
@@ -586,36 +719,6 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
             }
             catch
             {
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-                // Generic fallback: just surface first few entries.
-                float cpuPower = count > 0 ? floats[0] : 0;
-                float cpuTemp = count > 1 ? floats[1] : 0;
-                float coreClock = count > 2 ? floats[2] : 0;
-                float memClock = count > 3 ? floats[3] : 0;
-
-                baseMetrics = new SmuMetrics
-                {
-                    CpuPackagePowerWatts = cpuPower,
-                    CpuTempCelsius = cpuTemp,
-                    CoreClockMHz = coreClock,
-                    MemoryClockMHz = memClock
-                };
-            }
-
-            // Overlay with zenpower3 hwmon values if available.
-            var metrics = ApplyZenpowerOverrides(baseMetrics);
-
-            // Dump PM table and parsed values on first successful read (at startup).
-            if (!_hasDumpedOnce)
-            {
-                DumpPmTable(bytes, metrics, codenameIndex);
-                _hasDumpedOnce = true;
-            }
-
-            return metrics;
-=======
                 if (!_hasDumpedDiagnostic)
                 {
                     DumpDiagnostic("Exception while reading pm_table", codenameIndex);
@@ -641,61 +744,6 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
                     metrics = new SmuMetrics();
                 }
             }
->>>>>>> Stashed changes
-=======
-                if (!_hasDumpedDiagnostic)
-                {
-                    DumpDiagnostic("Exception while reading pm_table", codenameIndex);
-                    _hasDumpedDiagnostic = true;
-                }
-                // Fallback: Python script (same as dump_pm_voltages.py) can read sysfs when C# throws
-                if (codenameIndex == 23)
-                {
-                    var pyMetrics = TryReadPmTableViaPython();
-                    if (pyMetrics is { } m && (m.FclkMHz > 0 || m.Vsoc > 0))
-                    {
-                        metrics = ApplyZenpowerOverrides(m);
-                        metrics = ApplyK10TempCoreTempFallback(metrics);
-                        metrics = ApplyK10TempTctlTccdOverlay(metrics);
-                    }
-                    else
-                    {
-                        metrics = new SmuMetrics();
-                    }
-                }
-                else
-                {
-                    metrics = new SmuMetrics();
-                }
-            }
->>>>>>> Stashed changes
-=======
-                if (!_hasDumpedDiagnostic)
-                {
-                    DumpDiagnostic("Exception while reading pm_table", codenameIndex);
-                    _hasDumpedDiagnostic = true;
-                }
-                // Fallback: Python script (same as dump_pm_voltages.py) can read sysfs when C# throws
-                if (codenameIndex == 23)
-                {
-                    var pyMetrics = TryReadPmTableViaPython();
-                    if (pyMetrics is { } m && (m.FclkMHz > 0 || m.Vsoc > 0))
-                    {
-                        metrics = ApplyZenpowerOverrides(m);
-                        metrics = ApplyK10TempCoreTempFallback(metrics);
-                        metrics = ApplyK10TempTctlTccdOverlay(metrics);
-                    }
-                    else
-                    {
-                        metrics = new SmuMetrics();
-                    }
-                }
-                else
-                {
-                    metrics = new SmuMetrics();
-                }
-            }
->>>>>>> Stashed changes
         }
 
         // Overlay SPD (DIMM) temperatures from spd5118 hwmon.
@@ -713,28 +761,6 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
     {
         return codenameIndex switch
         {
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-            if (!_hasDumpedDiagnostic)
-            {
-                DumpDiagnostic("Exception while reading pm_table", codenameIndex);
-                _hasDumpedDiagnostic = true;
-            }
-            // Fallback: Python script (same as dump_pm_voltages.py) can read sysfs when C# throws
-            if (codenameIndex == 23)
-            {
-                var pyMetrics = TryReadPmTableViaPython();
-                if (pyMetrics is { } m && (m.FclkMHz > 0 || m.Vsoc > 0))
-                    return ApplyZenpowerOverrides(m);
-            }
-            return new SmuMetrics();
-        }
-=======
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
             23 => ReadGraniteRidgeDdr5Timings(),   // Granite Ridge DDR5
             4 or 9 or 10 or 12 or 18 or 19 => ReadGenericDdr4Timings(), // Matisse, Summit, Pinnacle, Vermeer, Naples, Chagall (DDR4 desktop/HEDT)
             _ => new DramTimingsModel()
@@ -752,13 +778,6 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
             4 or 9 or 10 or 12 or 18 or 19 => (dram.FrequencyHintMHz, MemType.DDR4),
             _ => (0f, MemType.Unknown)
         };
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
     }
 
     private static uint ReadSmn(uint address)
@@ -908,19 +927,12 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
         float vddgCcd = Get(pt, offsetCldoVddgCcd);
         float vddMisc = Get(pt, offsetVddMisc);
 
-<<<<<<< Updated upstream
-            return new SmuMetrics
-            {
-                FclkMHz = fclk,
-                UclkMHz = uclk,
-                MclkMHz = mclk,
-                Vsoc = vsoc,
-                Vddp = vddp,
-                VddgIod = vddgIod,
-                VddgCcd = vddgCcd,
-                VddMisc = vddMisc
-            };
-=======
+        // Package-level metrics from PM table (best-effort).
+        float packagePower = TryPlausiblePower(pt);
+        float packageCurrent = TryPlausibleCurrent(pt);
+        float coreClock = TryPlausibleCoreClock(pt);
+        if (coreClock == 0) coreClock = TryReadCpufreqMHz();
+
         var (pptW, coreTemps, tdieC, coreClocksGhz) = ReadKnownPmIndices(pt);
         if (coreClocksGhz.Length > 0)
         {
@@ -1380,52 +1392,6 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
         return model;
     }
 
-    // SVI2 telemetry SMN addresses. Family 17h (Zen1–Zen3) from zenpower/LibreHardwareMonitor.
-    // Zen 5 (Family 1Ah / Granite Ridge): no public SVI2 spec; we try the same base in case SMU kept compatibility.
-    private const uint Svi2Plane0Addr = 0x0005A00C; // Core for Zen1, SoC for Zen2 Ryzen
-    private const uint Svi2Plane1Addr = 0x0005A010; // SoC for Zen1, Core for Zen2 Ryzen
-
-    /// <summary>Read SVI2 telemetry via SMN (voltage/current). Formulas from zenpower; Zen2 current scale. Zen 5: same addresses tried.</summary>
-    private static (float CoreV, float CoreA, float SocV, float SocA)? TryReadSvi2Telemetry()
-    {
-        try
-        {
-            uint p0 = ReadSmn(Svi2Plane0Addr);
-            uint p1 = ReadSmn(Svi2Plane1Addr);
-
-            static float PlaneToVoltageMV(uint plane)
-            {
-                uint vddCor = (plane >> 16) & 0xFF;
-                return 1550f - (625f * vddCor / 100f); // mV
-            }
-
-            // Zen2 current scale (658.823 * idd); idd = low 8 bits. Result mA.
-            static float PlaneToCurrentMA(uint plane)
-            {
-                uint idd = plane & 0xFF;
-                return (658823f * idd) / 1000f;
-            }
-
-            float v0 = PlaneToVoltageMV(p0) / 1000f;
-            float a0 = PlaneToCurrentMA(p0) / 1000f;
-            float v1 = PlaneToVoltageMV(p1) / 1000f;
-            float a1 = PlaneToCurrentMA(p1) / 1000f;
-
-            // Plausible: V 0.3–2 V, A 0.01–200 A
-            bool ok0 = v0 >= 0.3f && v0 <= 2f && a0 >= 0.01f && a0 <= 200f;
-            bool ok1 = v1 >= 0.3f && v1 <= 2f && a1 >= 0.01f && a1 <= 200f;
-            if (!ok0 && !ok1) return null;
-
-            // Report plane0 as Core, plane1 as SoC (Zen1 order); on Zen2 they're swapped but both rails are valid
-            return (v0, a0, v1, a1);
-        }
-        catch
-        {
-            return null;
-        }
->>>>>>> Stashed changes
-    }
-
     private static SmuMetrics ApplyZenpowerOverrides(SmuMetrics metrics)
     {
         try
@@ -1481,14 +1447,10 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
 
             return new SmuMetrics
             {
-<<<<<<< Updated upstream
+                // Keep existing power/current from PM table; this helper only refines voltages.
                 CpuPackagePowerWatts = metrics.CpuPackagePowerWatts,
-                CpuTempCelsius = metrics.CpuTempCelsius,
-=======
-                CpuPackagePowerWatts = powerW,
-                // Use RAPL_P_Package as backup for PPT if PM table PPT is missing.
-                CpuPptWatts = metrics.CpuPptWatts > 0 ? metrics.CpuPptWatts : powerW,
-                CpuPackageCurrentAmps = currentA,
+                CpuPptWatts = metrics.CpuPptWatts,
+                CpuPackageCurrentAmps = metrics.CpuPackageCurrentAmps,
                 Vcore = metrics.Vcore,
                 CpuTempCelsius = metrics.CpuTempCelsius,
                 CoreTempsCelsius = metrics.CoreTempsCelsius,
@@ -1496,7 +1458,6 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
                 TctlCelsius = metrics.TctlCelsius,
                 Tccd1Celsius = metrics.Tccd1Celsius,
                 Tccd2Celsius = metrics.Tccd2Celsius,
->>>>>>> Stashed changes
                 CoreClockMHz = metrics.CoreClockMHz,
                 MemoryClockMHz = metrics.MemoryClockMHz,
                 FclkMHz = metrics.FclkMHz,
@@ -1517,16 +1478,6 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
         {
             return metrics;
         }
-    }
-
-<<<<<<< Updated upstream
-=======
-    private static bool TryReadHwmonFloat(string hwmonDir, string file, out float value)
-    {
-        value = 0;
-        var path = Path.Combine(hwmonDir, file);
-        if (!File.Exists(path)) return false;
-        return float.TryParse(File.ReadAllText(path).Trim(), out value);
     }
 
     /// <summary>
@@ -1583,7 +1534,11 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
             list.Add(celsius);
     }
 
-    /// <summary>If PM table core temps are empty or all zero, fill from k10temp CCD temps (alternative source).</summary>
+    /// <summary>
+    /// If PM table core temps are empty or all zero, build per-core temps from CCD-level
+    /// sensors (k10temp / zenpower). Since Linux doesn't expose actual per-core temps on
+    /// AMD Zen, we broadcast each CCD's temperature to all cores on that CCD.
+    /// </summary>
     private static SmuMetrics ApplyK10TempCoreTempFallback(SmuMetrics metrics)
     {
         var fromPm = metrics.CoreTempsCelsius;
@@ -1597,8 +1552,39 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
             if (hasNonZero) return metrics;
         }
 
-        var fromK10 = ReadK10TempCoreTemps();
-        if (fromK10.Count == 0) return metrics;
+        // Determine physical core count from usage/freq arrays (set by ApplyProcStatCoreUsage later,
+        // but at this stage those haven't been applied yet). Use cpufreq to count physical cores.
+        int physicalCores = CountPhysicalCores();
+        if (physicalCores == 0) physicalCores = 8; // sensible default for Zen desktop
+
+        // Get CCD temps from k10temp (temp3=Tccd1..temp10=Tccd8).
+        var ccdTemps = ReadK10TempCcdOnly();
+        if (ccdTemps.Count == 0)
+        {
+            // Fall back: use Tccd1 from zenpower or metrics if available.
+            float? fallbackTemp = metrics.Tccd1Celsius;
+            if (!fallbackTemp.HasValue || fallbackTemp.Value <= 0)
+            {
+                // Try zenpower Tccd1 directly.
+                var raw = ReadK10TempCoreTemps();
+                // zenpower returns [Tdie, Tctl, Tccd1, ...] — take the last value as CCD temp.
+                if (raw.Count > 0) fallbackTemp = raw[^1];
+            }
+            if (fallbackTemp.HasValue && fallbackTemp.Value > 0)
+                ccdTemps = new[] { fallbackTemp.Value };
+        }
+
+        if (ccdTemps.Count == 0) return metrics;
+
+        // Broadcast CCD temps to all cores. Zen 5 desktop: 8 cores per CCD.
+        // If 2 CCDs: first half of cores = CCD1, second half = CCD2.
+        int coresPerCcd = ccdTemps.Count > 1 ? physicalCores / ccdTemps.Count : physicalCores;
+        var perCore = new float[physicalCores];
+        for (int i = 0; i < physicalCores; i++)
+        {
+            int ccdIdx = coresPerCcd > 0 ? Math.Min(i / coresPerCcd, ccdTemps.Count - 1) : 0;
+            perCore[i] = ccdTemps[ccdIdx];
+        }
 
         return new SmuMetrics
         {
@@ -1607,7 +1593,8 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
             CpuPackageCurrentAmps = metrics.CpuPackageCurrentAmps,
             Vcore = metrics.Vcore,
             CpuTempCelsius = metrics.CpuTempCelsius,
-            CoreTempsCelsius = fromK10,
+            CoreTempsCelsius = perCore,
+            TdieCelsius = metrics.TdieCelsius,
             TctlCelsius = metrics.TctlCelsius,
             Tccd1Celsius = metrics.Tccd1Celsius,
             Tccd2Celsius = metrics.Tccd2Celsius,
@@ -1627,6 +1614,72 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
             MemVddq = metrics.MemVddq,
             MemVpp = metrics.MemVpp
         };
+    }
+
+    /// <summary>Read only CCD-level temps from k10temp (temp3=Tccd1, temp4=Tccd2, ...).</summary>
+    private static IReadOnlyList<float> ReadK10TempCcdOnly()
+    {
+        const string hwmonRoot = "/sys/class/hwmon";
+        if (!Directory.Exists(hwmonRoot)) return Array.Empty<float>();
+
+        foreach (var dir in Directory.GetDirectories(hwmonRoot))
+        {
+            var namePath = Path.Combine(dir, "name");
+            if (!File.Exists(namePath)) continue;
+            var name = File.ReadAllText(namePath).Trim();
+
+            if (name.Equals("k10temp", StringComparison.OrdinalIgnoreCase))
+            {
+                // k10temp: temp3 = Tccd1, temp4 = Tccd2, ...
+                var list = new List<float>();
+                for (int i = 3; i <= 10; i++)
+                    TryAddTempInput(dir, i, list);
+                return list;
+            }
+
+            if (name.Contains("zenpower", StringComparison.OrdinalIgnoreCase))
+            {
+                // zenpower: find Tccd* labels specifically.
+                var list = new List<float>();
+                for (int i = 1; i <= 10; i++)
+                {
+                    var labelPath = Path.Combine(dir, $"temp{i}_label");
+                    if (!File.Exists(labelPath)) continue;
+                    var label = File.ReadAllText(labelPath).Trim().ToLowerInvariant();
+                    if (label.StartsWith("tccd"))
+                    {
+                        var inputPath = Path.Combine(dir, $"temp{i}_input");
+                        if (!File.Exists(inputPath)) continue;
+                        if (int.TryParse(File.ReadAllText(inputPath).Trim(), out var raw))
+                        {
+                            float c = raw / 1000f;
+                            if (c >= 0f && c <= 150f) list.Add(c);
+                        }
+                    }
+                }
+                if (list.Count > 0) return list;
+            }
+        }
+        return Array.Empty<float>();
+    }
+
+    /// <summary>Count physical CPU cores from cpufreq directories (cpu0..cpuN, dividing by 2 for SMT).</summary>
+    private static int CountPhysicalCores()
+    {
+        try
+        {
+            int logical = 0;
+            for (int i = 0; i < 256; i++)
+            {
+                if (Directory.Exists($"/sys/devices/system/cpu/cpu{i}/cpufreq"))
+                    logical++;
+                else if (i > 0)
+                    break;
+            }
+            // SMT: 2 threads per core on Zen.
+            return logical > 0 ? logical / 2 : 0;
+        }
+        catch { return 0; }
     }
 
     /// <summary>Read Tctl (temp1), Tccd1 (temp3), Tccd2 (temp4) from k10temp only. Null for any channel not exposed.</summary>
@@ -1931,7 +1984,6 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
             if (proc.ExitCode != 0 || string.IsNullOrWhiteSpace(stdout))
                 return Array.Empty<float>();
 
-            string? currentChip = null;
             bool inSpd = false;
             foreach (var rawLine in stdout.Split('\n'))
             {
@@ -1945,8 +1997,7 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
                 // Chip header: no leading whitespace and no ':' (e.g. "spd5118-i2c-7-53")
                 if (!char.IsWhiteSpace(rawLine, 0) && !line.Contains(':'))
                 {
-                    currentChip = line.Trim();
-                    inSpd = currentChip.ToLowerInvariant().Contains("spd5118");
+                    inSpd = line.Trim().Contains("spd5118", StringComparison.OrdinalIgnoreCase);
                     continue;
                 }
 
@@ -2201,13 +2252,6 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
         return result;
     }
 
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
     private static DramTimingsModel ReadGraniteRidgeDdr5Timings()
     {
         var model = new DramTimingsModel();
