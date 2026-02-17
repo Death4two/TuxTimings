@@ -265,6 +265,10 @@
             <TextBlock Grid.Row="7" Grid.Column="1" Text="{Binding Summary.Metrics.CpuVddio, StringFormat=\{0:F4\}V}" Classes="value-highlight"/>
             <TextBlock Grid.Row="8" Grid.Column="0" Text="MEM VPP" Classes="label"/>
             <TextBlock Grid.Row="8" Grid.Column="1" Text="{Binding Summary.Metrics.MemVpp, StringFormat=\{0:F4\}V}" Classes="value-highlight"/>
+            <TextBlock Grid.Row="9" Grid.Column="0" Text="VCORE" Classes="label" Margin="0,10,0,0"/>
+            <TextBlock Grid.Row="9" Grid.Column="1" Text="{Binding Summary.Metrics.Vcore, StringFormat=\{0:F4\}V}" Classes="value-highlight" Margin="0,10,0,0"/>
+            <TextBlock Grid.Row="10" Grid.Column="0" Text="PPT" Classes="label"/>
+            <TextBlock Grid.Row="10" Grid.Column="1" Text="{Binding Summary.Metrics.CpuPptWatts, StringFormat=\{0:F1\}W}" Classes="value-highlight"/>
           </Grid>
         </StackPanel>
       </Border>

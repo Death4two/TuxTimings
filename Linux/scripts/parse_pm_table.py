@@ -19,6 +19,7 @@ OFFSETS = {
     "VDDG_IOD": 0x40C // 4,  # 259
     "VDDG_CCD": 0x414 // 4,  # 261
     "VDD_MISC": 0xE8 // 4,   # 58
+    "VCORE": 0x43C // 4,  # 271   
 }
 
 def main():

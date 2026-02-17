@@ -89,7 +89,7 @@ public sealed class RyzenSmuBackend : IHardwareBackend
                 VddgIod = values.GetValueOrDefault("VDDG_IOD"),
                 VddgCcd = values.GetValueOrDefault("VDDG_CCD"),
                 VddMisc = values.GetValueOrDefault("VDD_MISC"),
-                Vcore = PlausibleVcore(values.GetValueOrDefault("VCORE")),
+                Vcore = values.GetValueOrDefault("VCORE"),
                 CpuPackagePowerWatts = values.GetValueOrDefault("POWER"),
                 CpuPptWatts = values.GetValueOrDefault("PPT"),
                 CpuPackageCurrentAmps = values.GetValueOrDefault("CURRENT"),
@@ -158,7 +158,10 @@ public sealed class RyzenSmuBackend : IHardwareBackend
                 $"  CPU VDDIO: {metrics.CpuVddio:F3} V",
                 $"  MEM VDD:  {metrics.MemVdd:F3} V",
                 $"  MEM VDDQ: {metrics.MemVddq:F3} V",
-                $"  MEM VPP:  {metrics.MemVpp:F3} V"
+                $"  MEM VPP:  {metrics.MemVpp:F3} V",
+                $"  VCORE:    {metrics.Vcore:F4} V",
+                $"  PPT:      {metrics.CpuPptWatts:F1} W",
+                $"  Raw[271]: {(rawBytes.Length >= 272 * 4 ? BitConverter.ToSingle(rawBytes, 271 * 4):0):F6}"
             };
             File.WriteAllText(summaryPath, string.Join(Environment.NewLine, lines));
         }
@@ -652,13 +655,15 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
                                 Buffer.BlockCopy(bytes, 0, floats, 0, Math.Min(bytes.Length, floats.Length * 4));
                                 baseMetrics = ReadGraniteRidgeMetrics(floats, pmVersion);
                             }
-                            // If still zeros, try Python (same logic as dump_pm_voltages.py)
-                            if (baseMetrics.FclkMHz == 0 && baseMetrics.Vsoc == 0)
-                            {
-                                var pyMetrics = TryReadPmTableViaPython();
-                                if (pyMetrics is { } m && (m.FclkMHz > 0 || m.Vsoc > 0))
-                                    baseMetrics = m;
-                            }
+                        }
+
+                        // Backup path: if Vcore is still 0 after direct PM-table parsing,
+                        // overlay Vcore from parse_pm_table.py (VCORE key) while preserving other fields.
+                        if (baseMetrics.Vcore == 0f)
+                        {
+                            var pyMetrics = TryReadPmTableViaPython();
+                            if (pyMetrics is { } m && m.Vcore != 0f)
+                                baseMetrics = WithVcore(baseMetrics, m.Vcore);
                         }
                     }
                     else
@@ -910,6 +915,7 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
         const int offsetCldoVddgIod = 0x40C;
         const int offsetCldoVddgCcd = 0x414;
         const int offsetVddMisc = 0xE8;
+        const int offsetVcore = 0x43C; 
 
         static float Get(float[] table, int byteIndex)
         {
@@ -926,6 +932,7 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
         float vddgIod = Get(pt, offsetCldoVddgIod);
         float vddgCcd = Get(pt, offsetCldoVddgCcd);
         float vddMisc = Get(pt, offsetVddMisc);
+        float vcore = Get(pt, offsetVcore);
 
         // Package-level metrics from PM table (best-effort).
         float packagePower = TryPlausiblePower(pt);
@@ -943,9 +950,6 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
         }
 
         float cpuTemp = tdieC > 0 ? tdieC : TryPlausibleTemp(pt);
-
-        // PM table index 271 = core voltage (Granite Ridge, from watch_pm_table)
-        float vcore = 271 < pt.Length ? PlausibleVcore(pt[271]) : 0f;
         return new SmuMetrics
         {
             CpuPackagePowerWatts = packagePower,
@@ -1085,10 +1089,43 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
         return 0;
     }
 
-    /// <summary>Return value if in plausible core voltage range (0.25–2.2 V), else 0.</summary>
-    private static float PlausibleVcore(float v)
+    /// <summary>
+    /// Helper to create a copy of SmuMetrics with a different Vcore value, preserving all other fields.
+    /// Used to overlay Vcore from parse_pm_table.py when PM-table Vcore is 0.
+    /// </summary>
+    private static SmuMetrics WithVcore(SmuMetrics metrics, float vcore)
     {
-        return v >= 0.25f && v <= 2.2f ? v : 0f;
+        return new SmuMetrics
+        {
+            CpuPackagePowerWatts = metrics.CpuPackagePowerWatts,
+            CpuPptWatts = metrics.CpuPptWatts,
+            CpuPackageCurrentAmps = metrics.CpuPackageCurrentAmps,
+            Vcore = vcore,
+            CpuTempCelsius = metrics.CpuTempCelsius,
+            CoreTempsCelsius = metrics.CoreTempsCelsius,
+            CoreUsagePercent = metrics.CoreUsagePercent,
+            CoreFreqMHz = metrics.CoreFreqMHz,
+            TdieCelsius = metrics.TdieCelsius,
+            TctlCelsius = metrics.TctlCelsius,
+            Tccd1Celsius = metrics.Tccd1Celsius,
+            Tccd2Celsius = metrics.Tccd2Celsius,
+            CoreClockMHz = metrics.CoreClockMHz,
+            CoreClocksGhz = metrics.CoreClocksGhz,
+            MemoryClockMHz = metrics.MemoryClockMHz,
+            FclkMHz = metrics.FclkMHz,
+            UclkMHz = metrics.UclkMHz,
+            MclkMHz = metrics.MclkMHz,
+            Vsoc = metrics.Vsoc,
+            Vddp = metrics.Vddp,
+            VddgCcd = metrics.VddgCcd,
+            VddgIod = metrics.VddgIod,
+            VddMisc = metrics.VddMisc,
+            CpuVddio = metrics.CpuVddio,
+            MemVdd = metrics.MemVdd,
+            MemVddq = metrics.MemVddq,
+            MemVpp = metrics.MemVpp,
+            SpdTempsCelsius = metrics.SpdTempsCelsius
+        };
     }
 
     /// <summary>
@@ -1414,12 +1451,14 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
 
             if (zpPath is null) return metrics;
 
+            // Keep Vcore strictly from the PM table; do not override it with zenpower.
             float cpuVddio = metrics.CpuVddio;
             float memVdd = metrics.MemVdd;
             float memVddq = metrics.MemVddq;
             float memVpp = metrics.MemVpp;
             float vsoc = metrics.Vsoc;
 
+            // Read voltage inputs (in*_label / in*_input, millivolts) – only for SoC/MEM rails.
             foreach (var labelPath in Directory.GetFiles(zpPath, "in*_label"))
             {
                 var fileName = Path.GetFileName(labelPath);
@@ -1433,9 +1472,7 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
                 if (!float.TryParse(File.ReadAllText(valuePath).Trim(), out var mV)) continue;
                 float v = mV / 1000.0f;
 
-                if (label.Contains("vddcr_cpu") || (label.Contains("core") && cpuVddio == 0))
-                    cpuVddio = v;
-                else if (label.Contains("vddcr_soc") || label.Contains("vsoc"))
+                if (label.Contains("vddcr_soc") || label.Contains("vsoc") || label.Contains("svi2_soc"))
                     vsoc = v;
                 else if (label.Contains("vddio_mem") || label.Contains("vddmem") || label.Contains("mem vdd"))
                     memVdd = v;
@@ -1445,13 +1482,60 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
                     memVpp = v;
             }
 
+            // Read power inputs (power*_label / power*_input, microwatts).
+            // zenpower exposes RAPL_P_Package (package power) as a power sensor.
+            float packagePower = metrics.CpuPptWatts;
+            foreach (var labelPath in Directory.GetFiles(zpPath, "power*_label"))
+            {
+                var fileName = Path.GetFileName(labelPath);
+                // power1_label → extract "1"
+                var idxStr = fileName.AsSpan(5, fileName.Length - "power".Length - "_label".Length);
+                if (!int.TryParse(idxStr, out var idx)) continue;
+
+                var label = File.ReadAllText(labelPath).Trim().ToLowerInvariant();
+                var valuePath = Path.Combine(zpPath, $"power{idx}_input");
+                if (!File.Exists(valuePath)) continue;
+
+                if (!float.TryParse(File.ReadAllText(valuePath).Trim(), out var uW)) continue;
+                float watts = uW / 1_000_000f;
+
+                // RAPL_P_Package = total package power (best proxy for PPT)
+                if (label.Contains("rapl") || label.Contains("package"))
+                {
+                    if (watts >= 0.1f && watts <= 500f)
+                        packagePower = watts;
+                }
+            }
+
+            // Read current inputs (curr*_label / curr*_input, milliamps).
+            float packageCurrent = metrics.CpuPackageCurrentAmps;
+            foreach (var labelPath in Directory.GetFiles(zpPath, "curr*_label"))
+            {
+                var fileName = Path.GetFileName(labelPath);
+                var idxStr = fileName.AsSpan(4, fileName.Length - "curr".Length - "_label".Length);
+                if (!int.TryParse(idxStr, out var idx)) continue;
+
+                var label = File.ReadAllText(labelPath).Trim().ToLowerInvariant();
+                var valuePath = Path.Combine(zpPath, $"curr{idx}_input");
+                if (!File.Exists(valuePath)) continue;
+
+                if (!float.TryParse(File.ReadAllText(valuePath).Trim(), out var mA)) continue;
+                float amps = mA / 1000f;
+
+                // SVI2_C_Core = core current (TDC-relevant)
+                if (label.Contains("core") || label.Contains("svi2_c_core"))
+                {
+                    if (amps >= 0.01f && amps <= 300f)
+                        packageCurrent = amps;
+                }
+            }
+
             return new SmuMetrics
             {
-                // Keep existing power/current from PM table; this helper only refines voltages.
                 CpuPackagePowerWatts = metrics.CpuPackagePowerWatts,
-                CpuPptWatts = metrics.CpuPptWatts,
-                CpuPackageCurrentAmps = metrics.CpuPackageCurrentAmps,
-                Vcore = metrics.Vcore,
+                CpuPptWatts = packagePower,
+                CpuPackageCurrentAmps = packageCurrent,
+                Vcore = metrics.Vcore, // never overridden by zenpower
                 CpuTempCelsius = metrics.CpuTempCelsius,
                 CoreTempsCelsius = metrics.CoreTempsCelsius,
                 TdieCelsius = metrics.TdieCelsius,
@@ -1459,6 +1543,7 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
                 Tccd1Celsius = metrics.Tccd1Celsius,
                 Tccd2Celsius = metrics.Tccd2Celsius,
                 CoreClockMHz = metrics.CoreClockMHz,
+                CoreClocksGhz = metrics.CoreClocksGhz,
                 MemoryClockMHz = metrics.MemoryClockMHz,
                 FclkMHz = metrics.FclkMHz,
                 UclkMHz = metrics.UclkMHz,
