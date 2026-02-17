@@ -1,0 +1,222 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        x:Class="TuxTimings.LinuxUI.MainWindow"
+        Width="720" Height="580"
+        MinWidth="720" MaxWidth="720"
+        MinHeight="580" MaxHeight="580"
+        CanResize="False"
+        Title="TuxTimings"
+        Background="#0D1117"
+        FontFamily="Segoe UI, Liberation Sans, DejaVu Sans, sans-serif"
+        FontSize="13">
+  <Grid RowDefinitions="Auto,Auto,*,Auto" Margin="10">
+    <!-- Header: processor name centered, then codename/board + app version -->
+    <Grid Grid.Row="0" Margin="0,0,0,12" RowDefinitions="Auto,Auto" ColumnDefinitions="*,Auto">
+      <TextBlock Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2" Text="{Binding Summary.Cpu.DisplayName}" Classes="header-title" TextAlignment="Center" HorizontalAlignment="Stretch"/>
+      <StackPanel Grid.Row="1" Grid.Column="0" Margin="0,4,0,0">
+        <TextBlock Text="{Binding Summary.Cpu.CodeName}" Classes="header-muted"/>
+        <TextBlock Text="{Binding Summary.Cpu.SmuVersion}" Classes="footer-muted" Margin="0,2,0,0"/>
+        <TextBlock Text="{Binding Summary.BoardInfo.DisplayLine}" Classes="header-muted" Margin="0,2,0,0"/>
+      </StackPanel>
+      <StackPanel Grid.Row="1" Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,4,0,0">
+        <TextBlock Text="TuxTimings" Classes="header-muted" HorizontalAlignment="Right"/>
+        <TextBlock Text="{Binding AppVersion}" Classes="footer-muted" HorizontalAlignment="Right"/>
+      </StackPanel>
+    </Grid>
+
+    <!-- Top row: Speed | Capacity | Clocks (3 columns) -->
+    <Grid Grid.Row="1" ColumnDefinitions="*,*,*" Margin="0,0,0,12">
+      <Border Grid.Column="0" Classes="section" Margin="0,0,4,0">
+        <StackPanel Spacing="6">
+          <TextBlock Text="Speed" Classes="label"/>
+          <TextBlock Text="{Binding Summary.Memory.FrequencyString}" Classes="value-highlight"/>
+          <TextBlock Text="GDM" Classes="label" Margin="0,4,0,0"/>
+          <TextBlock Text="{Binding Summary.DramTimings.GdmEnabled, StringFormat=\{0\}}"/>
+          <TextBlock Text="PowerDown" Classes="label" Margin="0,4,0,0"/>
+          <TextBlock Text="{Binding Summary.DramTimings.PowerDownEnabled, StringFormat=\{0\}}"/>
+        </StackPanel>
+      </Border>
+      <Border Grid.Column="1" Classes="section" Margin="2,0">
+        <StackPanel Spacing="6">
+          <TextBlock Text="Capacity" Classes="label"/>
+          <TextBlock Text="{Binding Summary.Memory.TotalCapacity}" Classes="value-highlight"/>
+          <TextBlock Text="Part Number" Classes="label" Margin="0,4,0,0"/>
+          <TextBlock Text="{Binding Summary.Memory.PartNumber}" Classes="value-highlight" TextWrapping="Wrap"/>
+          <TextBlock Text="Cmd2T" Classes="label" Margin="0,4,0,0"/>
+          <TextBlock Text="{Binding Summary.DramTimings.Cmd2T}"/>
+        </StackPanel>
+      </Border>
+      <Border Grid.Column="2" Classes="section" Margin="4,0,0,0">
+        <StackPanel Spacing="6">
+          <TextBlock Text="Clocks" Classes="label"/>
+          <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto">
+            <TextBlock Grid.Row="0" Grid.Column="0" Text="MCLK:" Classes="label" Margin="0,0,8,4"/>
+            <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding Summary.Metrics.MclkMHz, StringFormat=\{0:F2\}}" Classes="value-highlight"/>
+            <TextBlock Grid.Row="1" Grid.Column="0" Text="FCLK:" Classes="label" Margin="0,0,8,4"/>
+            <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding Summary.Metrics.FclkMHz, StringFormat=\{0:F2\}}" Classes="value-highlight"/>
+            <TextBlock Grid.Row="2" Grid.Column="0" Text="UCLK:" Classes="label" Margin="0,0,8,4"/>
+            <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding Summary.Metrics.UclkMHz, StringFormat=\{0:F2\}}" Classes="value-highlight"/>
+          </Grid>
+        </StackPanel>
+      </Border>
+    </Grid>
+
+    <!-- Main: Primary | Secondary | Tertiary Timings | Voltages (4 columns) -->
+    <Grid Grid.Row="2" ColumnDefinitions="*,*,*,*" RowDefinitions="*">
+      <!-- Primary Timings -->
+      <Border Grid.Column="0" Classes="section" Margin="0,0,4,0">
+        <ScrollViewer VerticalScrollBarVisibility="Hidden" HorizontalScrollBarVisibility="Hidden">
+          <StackPanel Spacing="2">
+            <TextBlock Text="Primary Timings" Classes="section-title" Margin="0,0,0,8"/>
+            <Grid ColumnDefinitions="80,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
+              <TextBlock Grid.Row="0" Grid.Column="0" Text="tCL" Classes="label"/>
+              <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding Summary.DramTimings.Tcl}" Classes="value-highlight"/>
+              <TextBlock Grid.Row="1" Grid.Column="0" Text="tRCD" Classes="label"/>
+              <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding Summary.DramTimings.Trcd}" Classes="value-highlight"/>
+              <TextBlock Grid.Row="2" Grid.Column="0" Text="tRP" Classes="label"/>
+              <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding Summary.DramTimings.Trp}" Classes="value-highlight"/>
+              <TextBlock Grid.Row="3" Grid.Column="0" Text="tRAS" Classes="label"/>
+              <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding Summary.DramTimings.Tras}" Classes="value-highlight"/>
+              <TextBlock Grid.Row="4" Grid.Column="0" Text="tRC" Classes="label"/>
+              <TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding Summary.DramTimings.Trc}" Classes="value-highlight"/>
+              <TextBlock Grid.Row="5" Grid.Column="0" Text="tRRDS" Classes="label"/>
+              <TextBlock Grid.Row="5" Grid.Column="1" Text="{Binding Summary.DramTimings.Trrds}" Classes="value-highlight"/>
+              <TextBlock Grid.Row="6" Grid.Column="0" Text="tRRDL" Classes="label"/>
+              <TextBlock Grid.Row="6" Grid.Column="1" Text="{Binding Summary.DramTimings.Trrdl}" Classes="value-highlight"/>
+              <TextBlock Grid.Row="7" Grid.Column="0" Text="tFAW" Classes="label"/>
+              <TextBlock Grid.Row="7" Grid.Column="1" Text="{Binding Summary.DramTimings.Tfaw}" Classes="value-highlight"/>
+              <TextBlock Grid.Row="8" Grid.Column="0" Text="tWR" Classes="label"/>
+              <TextBlock Grid.Row="8" Grid.Column="1" Text="{Binding Summary.DramTimings.Twr}" Classes="value-highlight"/>
+              <TextBlock Grid.Row="9" Grid.Column="0" Text="tCWL" Classes="label"/>
+              <TextBlock Grid.Row="9" Grid.Column="1" Text="{Binding Summary.DramTimings.Tcwl}" Classes="value-highlight"/>
+              <TextBlock Grid.Row="10" Grid.Column="0" Text="tRFC (ns)" Classes="label"/>
+              <TextBlock Grid.Row="10" Grid.Column="1" Text="{Binding Summary.DramTimings.TrfcNs, StringFormat=\{0:F2\}}" Classes="value-highlight"/>
+              <TextBlock Grid.Row="11" Grid.Column="0" Text="tRFC" Classes="label"/>
+              <TextBlock Grid.Row="11" Grid.Column="1" Text="{Binding Summary.DramTimings.Rfc}" Classes="value-highlight"/>
+              <TextBlock Grid.Row="12" Grid.Column="0" Text="tRFC2" Classes="label"/>
+              <TextBlock Grid.Row="12" Grid.Column="1" Text="{Binding Summary.DramTimings.Rfc2}" Classes="value-highlight"/>
+              <TextBlock Grid.Row="13" Grid.Column="0" Text="tRFCsb" Classes="label"/>
+              <TextBlock Grid.Row="13" Grid.Column="1" Text="{Binding Summary.DramTimings.Rfcsb}" Classes="value-highlight"/>
+            </Grid>
+          </StackPanel>
+        </ScrollViewer>
+      </Border>
+
+      <!-- Secondary Timings -->
+      <Border Grid.Column="1" Classes="section" Margin="2,0">
+        <ScrollViewer VerticalScrollBarVisibility="Hidden" HorizontalScrollBarVisibility="Hidden">
+          <StackPanel Spacing="2">
+            <TextBlock Text="Secondary Timings" Classes="section-title" Margin="0,0,0,8"/>
+            <Grid ColumnDefinitions="90,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
+              <TextBlock Grid.Row="0" Grid.Column="0" Text="tRTP" Classes="label"/>
+              <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding Summary.DramTimings.Rtp}" Classes="value-highlight"/>
+              <TextBlock Grid.Row="1" Grid.Column="0" Text="tWTRS" Classes="label"/>
+              <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding Summary.DramTimings.Wtrs}" Classes="value-highlight"/>
+              <TextBlock Grid.Row="2" Grid.Column="0" Text="tWTRL" Classes="label"/>
+              <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding Summary.DramTimings.Wtrl}" Classes="value-highlight"/>
+              <TextBlock Grid.Row="3" Grid.Column="0" Text="tRDWR" Classes="label"/>
+              <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding Summary.DramTimings.Rdwr}" Classes="value-highlight"/>
+              <TextBlock Grid.Row="4" Grid.Column="0" Text="tWRRD" Classes="label"/>
+              <TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding Summary.DramTimings.Wrrd}" Classes="value-highlight"/>
+              <TextBlock Grid.Row="5" Grid.Column="0" Text="tRDRDSC" Classes="label"/>
+              <TextBlock Grid.Row="5" Grid.Column="1" Text="{Binding Summary.DramTimings.RdrdSc}" Classes="value-highlight"/>
+              <TextBlock Grid.Row="6" Grid.Column="0" Text="tRDRDSD" Classes="label"/>
+              <TextBlock Grid.Row="6" Grid.Column="1" Text="{Binding Summary.DramTimings.RdrdSd}" Classes="value-highlight"/>
+              <TextBlock Grid.Row="7" Grid.Column="0" Text="tRDRDDD" Classes="label"/>
+              <TextBlock Grid.Row="7" Grid.Column="1" Text="{Binding Summary.DramTimings.RdrdDd}" Classes="value-highlight"/>
+              <TextBlock Grid.Row="8" Grid.Column="0" Text="tWRWRSC" Classes="label"/>
+              <TextBlock Grid.Row="8" Grid.Column="1" Text="{Binding Summary.DramTimings.WrwrSc}" Classes="value-highlight"/>
+              <TextBlock Grid.Row="9" Grid.Column="0" Text="tWRWRSD" Classes="label"/>
+              <TextBlock Grid.Row="9" Grid.Column="1" Text="{Binding Summary.DramTimings.WrwrSd}" Classes="value-highlight"/>
+              <TextBlock Grid.Row="10" Grid.Column="0" Text="tWRWRDD" Classes="label"/>
+              <TextBlock Grid.Row="10" Grid.Column="1" Text="{Binding Summary.DramTimings.WrwrDd}" Classes="value-highlight"/>
+              <TextBlock Grid.Row="11" Grid.Column="0" Text="tREFI" Classes="label"/>
+              <TextBlock Grid.Row="11" Grid.Column="1" Text="{Binding Summary.DramTimings.Refi}" Classes="value-highlight"/>
+              <TextBlock Grid.Row="12" Grid.Column="0" Text="tREFI (ns)" Classes="label"/>
+              <TextBlock Grid.Row="12" Grid.Column="1" Text="{Binding Summary.DramTimings.TrefiNs, StringFormat=\{0:F2\}}" Classes="value-highlight"/>
+              <TextBlock Grid.Row="13" Grid.Column="0" Text="tWRPRE" Classes="label"/>
+              <TextBlock Grid.Row="13" Grid.Column="1" Text="{Binding Summary.DramTimings.Wrpre}" Classes="value-highlight"/>
+              <TextBlock Grid.Row="14" Grid.Column="0" Text="tRDPRE" Classes="label"/>
+              <TextBlock Grid.Row="14" Grid.Column="1" Text="{Binding Summary.DramTimings.Rdpre}" Classes="value-highlight"/>
+            </Grid>
+          </StackPanel>
+        </ScrollViewer>
+      </Border>
+
+      <!-- Tertiary Timings -->
+      <Border Grid.Column="2" Classes="section" Margin="4,0,0,0">
+        <ScrollViewer VerticalScrollBarVisibility="Hidden" HorizontalScrollBarVisibility="Hidden">
+          <StackPanel Spacing="2">
+            <TextBlock Text="Tertiary Timings" Classes="section-title" Margin="0,0,0,8"/>
+            <Grid ColumnDefinitions="110,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
+              <TextBlock Grid.Row="0" Grid.Column="0" Text="tRDRDSCL" Classes="label"/>
+              <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding Summary.DramTimings.RdrdScl}" Classes="value-highlight"/>
+              <TextBlock Grid.Row="1" Grid.Column="0" Text="tWRWRSCL" Classes="label"/>
+              <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding Summary.DramTimings.WrwrScl}" Classes="value-highlight"/>
+              <TextBlock Grid.Row="2" Grid.Column="0" Text="tCKE" Classes="label"/>
+              <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding Summary.DramTimings.Cke}" Classes="value-highlight"/>
+              <TextBlock Grid.Row="3" Grid.Column="0" Text="tXP" Classes="label"/>
+              <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding Summary.DramTimings.Xp}" Classes="value-highlight"/>
+              <TextBlock Grid.Row="4" Grid.Column="0" Text="tTRCPAGE" Classes="label"/>
+              <TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding Summary.DramTimings.TrcPage}" Classes="value-highlight"/>
+              <TextBlock Grid.Row="5" Grid.Column="0" Text="tMOD" Classes="label"/>
+              <TextBlock Grid.Row="5" Grid.Column="1" Text="{Binding Summary.DramTimings.Mod}" Classes="value-highlight"/>
+              <TextBlock Grid.Row="6" Grid.Column="0" Text="tMODPDA" Classes="label"/>
+              <TextBlock Grid.Row="6" Grid.Column="1" Text="{Binding Summary.DramTimings.ModPda}" Classes="value-highlight"/>
+              <TextBlock Grid.Row="7" Grid.Column="0" Text="tMRD" Classes="label"/>
+              <TextBlock Grid.Row="7" Grid.Column="1" Text="{Binding Summary.DramTimings.Mrd}" Classes="value-highlight"/>
+              <TextBlock Grid.Row="8" Grid.Column="0" Text="tMRDPDA" Classes="label"/>
+              <TextBlock Grid.Row="8" Grid.Column="1" Text="{Binding Summary.DramTimings.MrdPda}" Classes="value-highlight"/>
+              <TextBlock Grid.Row="9" Grid.Column="0" Text="tSTAG" Classes="label"/>
+              <TextBlock Grid.Row="9" Grid.Column="1" Text="{Binding Summary.DramTimings.Stag}" Classes="value-highlight"/>
+              <TextBlock Grid.Row="10" Grid.Column="0" Text="tSTAGsb" Classes="label"/>
+              <TextBlock Grid.Row="10" Grid.Column="1" Text="{Binding Summary.DramTimings.StagSb}" Classes="value-highlight"/>
+              <TextBlock Grid.Row="11" Grid.Column="0" Text="tPHYWRL" Classes="label"/>
+              <TextBlock Grid.Row="11" Grid.Column="1" Text="{Binding Summary.DramTimings.PhyWrl}" Classes="value-highlight"/>
+              <TextBlock Grid.Row="12" Grid.Column="0" Text="tPHYRDL" Classes="label"/>
+              <TextBlock Grid.Row="12" Grid.Column="1" Text="{Binding Summary.DramTimings.PhyRdl}" Classes="value-highlight"/>
+              <TextBlock Grid.Row="13" Grid.Column="0" Text="tPHYWRD" Classes="label"/>
+              <TextBlock Grid.Row="13" Grid.Column="1" Text="{Binding Summary.DramTimings.PhyWrd}" Classes="value-highlight"/>
+            </Grid>
+          </StackPanel>
+        </ScrollViewer>
+      </Border>
+
+      <!-- Voltages -->
+      <Border Grid.Column="3" Classes="section" Margin="4,0,0,0">
+        <StackPanel Spacing="2">
+          <TextBlock Text="Voltages" Classes="section-title" Margin="0,0,0,8"/>
+          <Grid ColumnDefinitions="100,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
+            <TextBlock Grid.Row="0" Grid.Column="0" Text="VSOC" Classes="label"/>
+            <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding Summary.Metrics.Vsoc, StringFormat=\{0:F4\}V}" Classes="value-highlight"/>
+            <TextBlock Grid.Row="1" Grid.Column="0" Text="CLDO VDDP" Classes="label"/>
+            <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding Summary.Metrics.Vddp, StringFormat=\{0:F4\}V}" Classes="value-highlight"/>
+            <TextBlock Grid.Row="2" Grid.Column="0" Text="VDDG CCD" Classes="label"/>
+            <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding Summary.Metrics.VddgCcd, StringFormat=\{0:F4\}V}" Classes="value-highlight"/>
+            <TextBlock Grid.Row="3" Grid.Column="0" Text="VDDG IOD" Classes="label"/>
+            <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding Summary.Metrics.VddgIod, StringFormat=\{0:F4\}V}" Classes="value-highlight"/>
+            <TextBlock Grid.Row="4" Grid.Column="0" Text="VDD MISC" Classes="label"/>
+            <TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding Summary.Metrics.VddMisc, StringFormat=\{0:F4\}V}" Classes="value-highlight"/>
+            <TextBlock Grid.Row="5" Grid.Column="0" Text="MEM VDD" Classes="label"/>
+            <TextBlock Grid.Row="5" Grid.Column="1" Text="{Binding Summary.Metrics.MemVdd, StringFormat=\{0:F4\}V}" Classes="value-highlight"/>
+            <TextBlock Grid.Row="6" Grid.Column="0" Text="MEM VDDQ" Classes="label"/>
+            <TextBlock Grid.Row="6" Grid.Column="1" Text="{Binding Summary.Metrics.MemVddq, StringFormat=\{0:F4\}V}" Classes="value-highlight"/>
+            <TextBlock Grid.Row="7" Grid.Column="0" Text="CPU VDDIO" Classes="label"/>
+            <TextBlock Grid.Row="7" Grid.Column="1" Text="{Binding Summary.Metrics.CpuVddio, StringFormat=\{0:F4\}V}" Classes="value-highlight"/>
+            <TextBlock Grid.Row="8" Grid.Column="0" Text="MEM VPP" Classes="label"/>
+            <TextBlock Grid.Row="8" Grid.Column="1" Text="{Binding Summary.Metrics.MemVpp, StringFormat=\{0:F4\}V}" Classes="value-highlight"/>
+          </Grid>
+        </StackPanel>
+      </Border>
+    </Grid>
+
+    <!-- Footer -->
+    <Grid Grid.Row="3" Grid.ColumnSpan="4" Margin="0,12,0,0" ColumnDefinitions="*,Auto">
+      <TextBlock Grid.Column="0" Classes="footer-muted" VerticalAlignment="Center"
+                 Text="DRAM timings &amp; MCLK/UCLK: SMN. Voltages &amp; FCLK: PM table."/>
+      <TextBlock Grid.Column="1" Text="DDR5" Classes="value-highlight" FontWeight="SemiBold" VerticalAlignment="Center"/>
+    </Grid>
+  </Grid>
+</Window>

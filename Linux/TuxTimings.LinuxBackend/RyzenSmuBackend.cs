@@ -1,0 +1,901 @@
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using TuxTimings.Core;
+
+namespace TuxTimings.LinuxBackend;
+
+public sealed class RyzenSmuBackend : IHardwareBackend
+{
+    private const string BasePath = "/sys/kernel/ryzen_smu_drv";
+
+    /// <summary>
+    /// Fallback: use Python script (same logic as dump_pm_voltages.py) to parse PM table.
+    /// Python reads sysfs successfully when C# may throw; script outputs key=value.
+    /// </summary>
+    private static SmuMetrics? TryReadPmTableViaPython()
+    {
+        var scriptPaths = new[]
+        {
+            Path.Combine(AppContext.BaseDirectory, "scripts", "parse_pm_table.py"),
+            Path.Combine(AppContext.BaseDirectory, "..", "scripts", "parse_pm_table.py"),
+            Path.Combine(Directory.GetCurrentDirectory(), "scripts", "parse_pm_table.py"),
+            Path.Combine(Directory.GetCurrentDirectory(), "scripts", "..", "Linux", "scripts", "parse_pm_table.py"),
+        };
+
+        string? scriptPath = null;
+        foreach (var p in scriptPaths)
+        {
+            var full = Path.GetFullPath(p);
+            if (File.Exists(full))
+            {
+                scriptPath = full;
+                break;
+            }
+        }
+        if (scriptPath is null) return null;
+
+        try
+        {
+            using var proc = new Process
+            {
+                StartInfo = new ProcessStartInfo
+                {
+                    FileName = "python3",
+                    Arguments = $"\"{scriptPath}\"",
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                }
+            };
+            proc.Start();
+            var stdout = proc.StandardOutput.ReadToEnd();
+            proc.WaitForExit(3000);
+            if (proc.ExitCode != 0) return null;
+
+            var values = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
+            foreach (var line in stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var eq = line.IndexOf('=');
+                if (eq <= 0) continue;
+                var key = line[..eq].Trim();
+                if (float.TryParse(line[(eq + 1)..].Trim(), out var v))
+                    values[key] = v;
+            }
+
+            if (values.Count == 0) return null;
+
+            return new SmuMetrics
+            {
+                FclkMHz = values.GetValueOrDefault("FCLK"),
+                UclkMHz = values.GetValueOrDefault("UCLK"),
+                MclkMHz = values.GetValueOrDefault("MCLK"),
+                Vsoc = values.GetValueOrDefault("VSOC"),
+                Vddp = values.GetValueOrDefault("VDDP"),
+                VddgIod = values.GetValueOrDefault("VDDG_IOD"),
+                VddgCcd = values.GetValueOrDefault("VDDG_CCD"),
+                VddMisc = values.GetValueOrDefault("VDD_MISC")
+            };
+        }
+        catch
+        {
+            return null;
+        }
+    }
+    private static bool _hasDumpedOnce;
+    private static bool _hasDumpedDiagnostic;
+
+    private static string GetDumpDirectory()
+    {
+        // When running with sudo, use /tmp so the real user can find the dump.
+        var sudoUser = Environment.GetEnvironmentVariable("SUDO_USER");
+        if (!string.IsNullOrEmpty(sudoUser))
+        {
+            return "/tmp/zentimings";
+        }
+        var cacheHome = Environment.GetEnvironmentVariable("XDG_CACHE_HOME");
+        if (string.IsNullOrEmpty(cacheHome))
+        {
+            var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            cacheHome = Path.Combine(home, ".cache");
+        }
+        return Path.Combine(cacheHome, "zentimings");
+    }
+
+    private static void DumpPmTable(byte[] rawBytes, SmuMetrics metrics, int codenameIndex)
+    {
+        try
+        {
+            var dir = GetDumpDirectory();
+            Directory.CreateDirectory(dir);
+
+            var binPath = Path.Combine(dir, "pm_table_latest.bin");
+            File.WriteAllBytes(binPath, rawBytes);
+
+            var summaryPath = Path.Combine(dir, "pm_table_summary.txt");
+            var lines = new[]
+            {
+                $"Dumped at: {DateTime.Now:yyyy-MM-dd HH:mm:ss}",
+                $"Dump path: {dir}",
+                $"Codename index: {codenameIndex}",
+                $"Raw size: {rawBytes.Length} bytes ({rawBytes.Length / 4} floats)",
+                "",
+                "Parsed metrics (these are what the UI displays):",
+                $"  FCLK:     {metrics.FclkMHz:F0} MHz",
+                $"  UCLK:     {metrics.UclkMHz:F0} MHz",
+                $"  MCLK:     {metrics.MclkMHz:F0} MHz",
+                $"  VSOC:     {metrics.Vsoc:F3} V",
+                $"  VDDP:     {metrics.Vddp:F3} V",
+                $"  VDDG IOD: {metrics.VddgIod:F3} V",
+                $"  VDDG CCD: {metrics.VddgCcd:F3} V",
+                $"  VDD MISC: {metrics.VddMisc:F3} V",
+                $"  CPU VDDIO: {metrics.CpuVddio:F3} V",
+                $"  MEM VDD:  {metrics.MemVdd:F3} V",
+                $"  MEM VDDQ: {metrics.MemVddq:F3} V",
+                $"  MEM VPP:  {metrics.MemVpp:F3} V"
+            };
+            File.WriteAllText(summaryPath, string.Join(Environment.NewLine, lines));
+        }
+        catch
+        {
+            // ignore dump failures
+        }
+    }
+
+    /// <summary>Dumps a diagnostic file when the PM table is missing or read fails.</summary>
+    private static void DumpDiagnostic(string reason, int codenameIndex)
+    {
+        try
+        {
+            var dir = GetDumpDirectory();
+            Directory.CreateDirectory(dir);
+            var path = Path.Combine(dir, "pm_table_diagnostic.txt");
+            var pmTablePath = Path.Combine(BasePath, "pm_table");
+            var pmVersionPath = Path.Combine(BasePath, "pm_table_version");
+            var content = $@"Dumped at: {DateTime.Now:yyyy-MM-dd HH:mm:ss}
+Dump path: {dir}
+Reason: {reason}
+Codename index: {codenameIndex}
+pm_table exists: {File.Exists(pmTablePath)}
+pm_table_version exists: {File.Exists(pmVersionPath)}
+
+If pm_table is missing, the ryzen_smu driver may not support your PM table version.
+Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
+";
+            File.WriteAllText(path, content);
+        }
+        catch { }
+    }
+
+    public bool IsSupported()
+    {
+        try
+        {
+            return Directory.Exists(BasePath)
+                   && File.Exists(Path.Combine(BasePath, "version"));
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public SystemSummary ReadSummary()
+    {
+        var (processorName, partNumbers, motherboardProductName, biosVersion, biosReleaseDate) = ReadDmidecode();
+        var codenameIndex = ReadCodenameIndex();
+
+        var cpu = new CpuInfoModel
+        {
+            Name = "AMD Ryzen (from ryzen_smu)",
+            ProcessorName = processorName,
+            CodeName = MapCodename(codenameIndex),
+            SmuVersion = ReadString("version"),
+            Package = string.Empty
+        };
+
+        var metrics = ReadMetrics(codenameIndex);
+
+        var isGraniteRidge = codenameIndex == 23;
+        var dramTimings = isGraniteRidge
+            ? ReadGraniteRidgeDdr5Timings()
+            : new DramTimingsModel();
+
+        var memory = new MemoryConfigModel
+        {
+            Frequency = isGraniteRidge ? dramTimings.FrequencyHintMHz : 0,
+            Type = isGraniteRidge ? MemType.DDR5 : MemType.Unknown,
+            TotalCapacity = ReadTotalMemory(),
+            PartNumber = partNumbers
+        };
+
+        var boardInfo = new BoardInfoModel
+        {
+            MotherboardProductName = motherboardProductName,
+            BiosVersion = biosVersion,
+            BiosReleaseDate = biosReleaseDate
+        };
+
+        return new SystemSummary
+        {
+            Cpu = cpu,
+            Memory = memory,
+            BoardInfo = boardInfo,
+            Modules = Array.Empty<MemoryModule>(),
+            Metrics = metrics,
+            DramTimings = dramTimings
+        };
+    }
+
+    private static string ReadString(string fileName)
+    {
+        var path = Path.Combine(BasePath, fileName);
+        if (!File.Exists(path)) return string.Empty;
+        return File.ReadAllText(path).Trim();
+    }
+
+    /// <summary>
+    /// Runs dmidecode to get processor name, RAM part numbers, motherboard, and BIOS info.
+    /// Called before displaying the main window. Requires root for full access.
+    /// </summary>
+    private static (string ProcessorName, string PartNumbers, string MotherboardProductName, string BiosVersion, string BiosReleaseDate) ReadDmidecode()
+    {
+        var processorName = string.Empty;
+        var partNumbers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var motherboardProductName = string.Empty;
+        var biosVersion = string.Empty;
+        var biosReleaseDate = string.Empty;
+
+        try
+        {
+            processorName = RunDmidecodeAndParse("processor", ParseProcessor).Trim();
+            var memResult = RunDmidecodeAndParse("memory", ParseMemory);
+            foreach (var pn in memResult.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+            {
+                if (!string.IsNullOrWhiteSpace(pn))
+                    partNumbers.Add(pn.Trim());
+            }
+
+            motherboardProductName = RunDmidecodeString("baseboard-product-name");
+            biosVersion = RunDmidecodeString("bios-version");
+            biosReleaseDate = RunDmidecodeString("bios-release-date");
+        }
+        catch
+        {
+            // dmidecode may require root; ignore
+        }
+
+        return (processorName, string.Join(", ", partNumbers), motherboardProductName, biosVersion, biosReleaseDate);
+    }
+
+    /// <summary>Runs dmidecode -s &lt;keyword&gt; and returns trimmed stdout (e.g. baseboard-product-name, bios-version).</summary>
+    private static string RunDmidecodeString(string keyword)
+    {
+        try
+        {
+            using var proc = new Process
+            {
+                StartInfo = new ProcessStartInfo
+                {
+                    FileName = "dmidecode",
+                    Arguments = $"-s {keyword}",
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                }
+            };
+            proc.Start();
+            var stdout = proc.StandardOutput.ReadToEnd();
+            proc.WaitForExit(5000);
+            return proc.ExitCode == 0 ? stdout.Trim() : string.Empty;
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
+    private static string RunDmidecodeAndParse(string type, Func<string, string> parser)
+    {
+        try
+        {
+            using var proc = new Process
+            {
+                StartInfo = new ProcessStartInfo
+                {
+                    FileName = "dmidecode",
+                    Arguments = $"-t {type}",
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                }
+            };
+            proc.Start();
+            var stdout = proc.StandardOutput.ReadToEnd();
+            proc.WaitForExit(5000);
+            return proc.ExitCode == 0 ? parser(stdout) : string.Empty;
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
+    private static string ParseProcessor(string stdout)
+    {
+        var inProc = false;
+        foreach (var line in stdout.Split('\n'))
+        {
+            if (line.Contains("Processor Information", StringComparison.OrdinalIgnoreCase))
+            {
+                inProc = true;
+                continue;
+            }
+            if (inProc && line.TrimStart().StartsWith("Version:", StringComparison.OrdinalIgnoreCase))
+            {
+                var colon = line.IndexOf(':', StringComparison.Ordinal);
+                return colon >= 0 ? line[(colon + 1)..].Trim() : string.Empty;
+            }
+            if (inProc && line.StartsWith("\t", StringComparison.Ordinal) == false && line.Trim().Length > 0)
+                break;
+        }
+        return string.Empty;
+    }
+
+    private static string ParseMemory(string stdout)
+    {
+        var partNumbers = new List<string>();
+        var inMem = false;
+        foreach (var line in stdout.Split('\n'))
+        {
+            if (line.Contains("Memory Device", StringComparison.OrdinalIgnoreCase))
+            {
+                inMem = true;
+                continue;
+            }
+            if (inMem && line.TrimStart().StartsWith("Part Number:", StringComparison.OrdinalIgnoreCase))
+            {
+                var colon = line.IndexOf(':', StringComparison.Ordinal);
+                var pn = colon >= 0 ? line[(colon + 1)..].Trim() : string.Empty;
+                if (!string.IsNullOrEmpty(pn) && pn != "Unknown" && pn != "NO DIMM")
+                    partNumbers.Add(pn);
+            }
+            if (inMem && line.StartsWith("\t", StringComparison.Ordinal) == false && line.Trim().Length > 0)
+                inMem = false;
+        }
+        return string.Join("\n", partNumbers);
+    }
+
+    private static SmuMetrics ReadMetrics(int codenameIndex)
+    {
+        // Best-effort: if pm_table is present, read a few floats from it.
+        var pmTablePath = Path.Combine(BasePath, "pm_table");
+        if (!File.Exists(pmTablePath))
+        {
+            if (!_hasDumpedDiagnostic)
+            {
+                DumpDiagnostic("pm_table file does not exist", codenameIndex);
+                _hasDumpedDiagnostic = true;
+            }
+            return new SmuMetrics();
+        }
+
+        try
+        {
+            // Sysfs can occasionally return stale/empty data on first read; retry once if needed.
+            byte[] bytes = File.ReadAllBytes(pmTablePath);
+            if (bytes.Length < 4)
+            {
+                return new SmuMetrics();
+            }
+
+            var count = bytes.Length / 4;
+            var floats = new float[count];
+            Buffer.BlockCopy(bytes, 0, floats, 0, bytes.Length);
+
+            SmuMetrics baseMetrics;
+
+            if (codenameIndex == 23)
+            {
+                var pmVersion = ReadUInt32("pm_table_version");
+                baseMetrics = ReadGraniteRidgeMetrics(floats, pmVersion);
+
+                // Retry once if we got zeros but table has data (sysfs timing)
+                if (baseMetrics.FclkMHz == 0 && baseMetrics.Vsoc == 0 && count >= 84)
+                {
+                    bytes = File.ReadAllBytes(pmTablePath);
+                    if (bytes.Length >= 4)
+                    {
+                        count = bytes.Length / 4;
+                        Buffer.BlockCopy(bytes, 0, floats, 0, Math.Min(bytes.Length, floats.Length * 4));
+                        baseMetrics = ReadGraniteRidgeMetrics(floats, pmVersion);
+                    }
+                    // If still zeros, try Python (same logic as dump_pm_voltages.py)
+                    if (baseMetrics.FclkMHz == 0 && baseMetrics.Vsoc == 0)
+                    {
+                        var pyMetrics = TryReadPmTableViaPython();
+                        if (pyMetrics is { } m && (m.FclkMHz > 0 || m.Vsoc > 0))
+                            baseMetrics = m;
+                    }
+                }
+            }
+            else
+            {
+                // Generic fallback: just surface first few entries.
+                float cpuPower = count > 0 ? floats[0] : 0;
+                float cpuTemp = count > 1 ? floats[1] : 0;
+                float coreClock = count > 2 ? floats[2] : 0;
+                float memClock = count > 3 ? floats[3] : 0;
+
+                baseMetrics = new SmuMetrics
+                {
+                    CpuPackagePowerWatts = cpuPower,
+                    CpuTempCelsius = cpuTemp,
+                    CoreClockMHz = coreClock,
+                    MemoryClockMHz = memClock
+                };
+            }
+
+            // Overlay with zenpower3 hwmon values if available.
+            var metrics = ApplyZenpowerOverrides(baseMetrics);
+
+            // Dump PM table and parsed values on first successful read (at startup).
+            if (!_hasDumpedOnce)
+            {
+                DumpPmTable(bytes, metrics, codenameIndex);
+                _hasDumpedOnce = true;
+            }
+
+            return metrics;
+        }
+        catch
+        {
+            if (!_hasDumpedDiagnostic)
+            {
+                DumpDiagnostic("Exception while reading pm_table", codenameIndex);
+                _hasDumpedDiagnostic = true;
+            }
+            // Fallback: Python script (same as dump_pm_voltages.py) can read sysfs when C# throws
+            if (codenameIndex == 23)
+            {
+                var pyMetrics = TryReadPmTableViaPython();
+                if (pyMetrics is { } m && (m.FclkMHz > 0 || m.Vsoc > 0))
+                    return ApplyZenpowerOverrides(m);
+            }
+            return new SmuMetrics();
+        }
+    }
+
+    private static uint ReadSmn(uint address)
+    {
+        var path = Path.Combine(BasePath, "smn");
+        if (!File.Exists(path))
+        {
+            throw new IOException("ryzen_smu smn interface not found.");
+        }
+
+        using var fs = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite);
+        Span<byte> buf = stackalloc byte[4];
+
+        // write address (little endian)
+        BitConverter.TryWriteBytes(buf, address);
+        fs.Write(buf);
+
+        // read back value
+        fs.Position = 0;
+        fs.Read(buf);
+        return BitConverter.ToUInt32(buf);
+    }
+
+    private static uint ReadUInt32(string fileName)
+    {
+        var path = Path.Combine(BasePath, fileName);
+        if (!File.Exists(path)) return 0;
+        var bytes = File.ReadAllBytes(path);
+        if (bytes.Length < 4) return 0;
+        return BitConverter.ToUInt32(bytes, 0);
+    }
+
+    private static string ReadTotalMemory()
+    {
+        try
+        {
+            var meminfo = "/proc/meminfo";
+            if (!File.Exists(meminfo)) return string.Empty;
+
+            foreach (var line in File.ReadAllLines(meminfo))
+            {
+                if (line.StartsWith("MemTotal:", StringComparison.Ordinal))
+                {
+                    var parts = line.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                    if (parts.Length >= 2 && ulong.TryParse(parts[1], out var kB))
+                    {
+                        double gib = kB / 1024.0 / 1024.0;
+                        return $"{gib:F1} GiB";
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // ignore
+        }
+        return string.Empty;
+    }
+
+    private static int ReadCodenameIndex()
+    {
+        var raw = ReadString("codename");
+        if (string.IsNullOrEmpty(raw)) return -1;
+
+        return int.TryParse(raw, out var index) ? index : -1;
+    }
+
+    private static string MapCodename(int index)
+    {
+        return index switch
+        {
+            1 => "Colfax",
+            2 => "Renoir",
+            3 => "Picasso",
+            4 => "Matisse",
+            5 => "Threadripper",
+            6 => "Castle Peak",
+            7 => "Raven Ridge",
+            8 => "Raven Ridge 2",
+            9 => "Summit Ridge",
+            10 => "Pinnacle Ridge",
+            11 => "Rembrandt",
+            12 => "Vermeer",
+            13 => "Vangogh",
+            14 => "Cezanne",
+            15 => "Milan",
+            16 => "Dali",
+            17 => "Luciene",
+            18 => "Naples",
+            19 => "Chagall",
+            20 => "Raphael",
+            21 => "Phoenix",
+            22 => "Strix Point",
+            23 => "Granite Ridge",
+            24 => "Hawk Point",
+            25 => "Storm Peak",
+            _ => index >= 0 ? $"Unknown ({index})" : string.Empty
+        };
+    }
+
+    private static uint BitSlice(uint value, int hiBit, int loBit)
+    {
+        var width = hiBit - loBit + 1;
+        if (width <= 0 || width > 32) return 0;
+        uint mask = width == 32 ? 0xFFFFFFFFu : ((1u << width) - 1u);
+        return (value >> loBit) & mask;
+    }
+
+    private static SmuMetrics ReadGraniteRidgeMetrics(float[] pt, uint pmVersion)
+    {
+        // Granite Ridge PM table: use generic Zen5 desktop definition (0x000620)
+        // as in ZenStates-Core PowerTable. Offsets are in bytes.
+        const int offsetFclk = 0x11C;
+        const int offsetUclk = 0x12C;
+        const int offsetMclk = 0x13C;
+        const int offsetVddcrSoc = 0x14C;
+        const int offsetCldoVddp = 0x434;
+        const int offsetCldoVddgIod = 0x40C;
+        const int offsetCldoVddgCcd = 0x414;
+        const int offsetVddMisc = 0xE8;
+
+        static float Get(float[] table, int byteIndex)
+        {
+            if (byteIndex < 0) return 0;
+            int idx = byteIndex / 4;
+            return idx >= 0 && idx < table.Length ? table[idx] : 0;
+        }
+
+        float fclk = Get(pt, offsetFclk);
+        float uclk = Get(pt, offsetUclk);
+        float mclk = Get(pt, offsetMclk);
+        float vsoc = Get(pt, offsetVddcrSoc);
+        float vddp = Get(pt, offsetCldoVddp);
+        float vddgIod = Get(pt, offsetCldoVddgIod);
+        float vddgCcd = Get(pt, offsetCldoVddgCcd);
+        float vddMisc = Get(pt, offsetVddMisc);
+
+            return new SmuMetrics
+            {
+                FclkMHz = fclk,
+                UclkMHz = uclk,
+                MclkMHz = mclk,
+                Vsoc = vsoc,
+                Vddp = vddp,
+                VddgIod = vddgIod,
+                VddgCcd = vddgCcd,
+                VddMisc = vddMisc
+            };
+    }
+
+    private static SmuMetrics ApplyZenpowerOverrides(SmuMetrics metrics)
+    {
+        try
+        {
+            const string hwmonRoot = "/sys/class/hwmon";
+            if (!Directory.Exists(hwmonRoot)) return metrics;
+
+            string? zpPath = null;
+            foreach (var dir in Directory.GetDirectories(hwmonRoot))
+            {
+                var namePath = Path.Combine(dir, "name");
+                if (!File.Exists(namePath)) continue;
+                var name = File.ReadAllText(namePath).Trim().ToLowerInvariant();
+                if (name.Contains("zenpower"))
+                {
+                    zpPath = dir;
+                    break;
+                }
+            }
+
+            if (zpPath is null) return metrics;
+
+            float cpuVddio = metrics.CpuVddio;
+            float memVdd = metrics.MemVdd;
+            float memVddq = metrics.MemVddq;
+            float memVpp = metrics.MemVpp;
+            float vsoc = metrics.Vsoc;
+
+            foreach (var labelPath in Directory.GetFiles(zpPath, "in*_label"))
+            {
+                var fileName = Path.GetFileName(labelPath);
+                var idxStr = fileName.AsSpan(2, fileName.Length - "in".Length - "_label".Length);
+                if (!int.TryParse(idxStr, out var idx)) continue;
+
+                var label = File.ReadAllText(labelPath).Trim().ToLowerInvariant();
+                var valuePath = Path.Combine(zpPath, $"in{idx}_input");
+                if (!File.Exists(valuePath)) continue;
+
+                if (!float.TryParse(File.ReadAllText(valuePath).Trim(), out var mV)) continue;
+                float v = mV / 1000.0f;
+
+                if (label.Contains("vddcr_cpu") || (label.Contains("core") && cpuVddio == 0))
+                    cpuVddio = v;
+                else if (label.Contains("vddcr_soc") || label.Contains("vsoc"))
+                    vsoc = v;
+                else if (label.Contains("vddio_mem") || label.Contains("vddmem") || label.Contains("mem vdd"))
+                    memVdd = v;
+                else if (label.Contains("vddq") && label.Contains("mem"))
+                    memVddq = v;
+                else if (label.Contains("vpp") && label.Contains("mem"))
+                    memVpp = v;
+            }
+
+            return new SmuMetrics
+            {
+                CpuPackagePowerWatts = metrics.CpuPackagePowerWatts,
+                CpuTempCelsius = metrics.CpuTempCelsius,
+                CoreClockMHz = metrics.CoreClockMHz,
+                MemoryClockMHz = metrics.MemoryClockMHz,
+                FclkMHz = metrics.FclkMHz,
+                UclkMHz = metrics.UclkMHz,
+                MclkMHz = metrics.MclkMHz,
+                Vsoc = vsoc,
+                Vddp = metrics.Vddp,
+                VddgCcd = metrics.VddgCcd,
+                VddgIod = metrics.VddgIod,
+                VddMisc = metrics.VddMisc,
+                CpuVddio = cpuVddio,
+                MemVdd = memVdd,
+                MemVddq = memVddq,
+                MemVpp = memVpp
+            };
+        }
+        catch
+        {
+            return metrics;
+        }
+    }
+
+    private static DramTimingsModel ReadGraniteRidgeDdr5Timings()
+    {
+        var model = new DramTimingsModel();
+
+        try
+        {
+            const uint offset = 0; // UMC0
+
+            // Ratio -> frequency (like Ddr5Timings.Read)
+            uint ratioReg = ReadSmn(offset | 0x50200);
+            float ratio = BitSlice(ratioReg, 15, 0) / 100.0f;
+            float memFreq = ratio * 200.0f;
+
+            // Gear-down mode, command rate, power-down
+            bool gdm = BitSlice(ratioReg, 18, 18) == 1;
+            bool cmd2T = BitSlice(ratioReg, 17, 17) == 1;
+            uint refreshModeReg = ReadSmn(offset | 0x5012C);
+            bool powerDown = BitSlice(refreshModeReg, 28, 28) == 1;
+
+            // Primary and secondary timings using DDR5Dictionary map
+            uint reg50204 = ReadSmn(offset | 0x50204);
+            uint reg50208 = ReadSmn(offset | 0x50208);
+            uint reg5020C = ReadSmn(offset | 0x5020C);
+            uint reg50210 = ReadSmn(offset | 0x50210);
+            uint reg50214 = ReadSmn(offset | 0x50214);
+            uint reg50218 = ReadSmn(offset | 0x50218);
+            uint reg5021C = ReadSmn(offset | 0x5021C);
+            uint reg50220 = ReadSmn(offset | 0x50220);
+            uint reg50224 = ReadSmn(offset | 0x50224);
+            uint reg50228 = ReadSmn(offset | 0x50228);
+            uint reg50230 = ReadSmn(offset | 0x50230);
+            uint reg50234 = ReadSmn(offset | 0x50234);
+            uint reg50250 = ReadSmn(offset | 0x50250);
+            uint reg50254 = ReadSmn(offset | 0x50254);
+            uint reg50258 = ReadSmn(offset | 0x50258);
+            uint reg502A4 = ReadSmn(offset | 0x502A4);
+
+            uint tcl = BitSlice(reg50204, 5, 0);
+            uint trcd = BitSlice(reg50204, 21, 16);
+            uint tras = BitSlice(reg50204, 14, 8);
+            uint trp = BitSlice(reg50208, 21, 16);
+            uint trc = BitSlice(reg50208, 7, 0);
+
+            uint trrds = BitSlice(reg5020C, 4, 0);
+            uint trrdl = BitSlice(reg5020C, 12, 8);
+            uint tfaw = BitSlice(reg50210, 7, 0);
+            uint rtp = BitSlice(reg5020C, 28, 24);
+            uint twrs = BitSlice(reg50214, 12, 8);
+            uint twrl = BitSlice(reg50214, 22, 16);
+            uint tcwl = BitSlice(reg50214, 5, 0);
+            uint twr = BitSlice(reg50218, 7, 0);
+
+            uint trcPage = BitSlice(reg5021C, 31, 20);
+
+            uint rdrdScl = BitSlice(reg50220, 29, 24);
+            uint rdrdSc = BitSlice(reg50220, 19, 16);
+            uint rdrdSd = BitSlice(reg50220, 11, 8);
+            uint rdrdDd = BitSlice(reg50220, 3, 0);
+
+            uint wrwrScl = BitSlice(reg50224, 29, 24);
+            uint wrwrSc = BitSlice(reg50224, 19, 16);
+            uint wrwrSd = BitSlice(reg50224, 11, 8);
+            uint wrwrDd = BitSlice(reg50224, 3, 0);
+
+            uint rdwr = BitSlice(reg50228, 13, 8);
+            uint wrrd = BitSlice(reg50228, 3, 0);
+
+            uint refi = BitSlice(reg50230, 15, 0);
+
+            uint modPda = BitSlice(reg50234, 29, 24);
+            uint mrdPda = BitSlice(reg50234, 21, 16);
+            uint mod = BitSlice(reg50234, 13, 8);
+            uint mrd = BitSlice(reg50234, 5, 0);
+
+            uint stag = BitSlice(reg50250, 26, 16);
+            uint stagSb = BitSlice(reg50250, 8, 0);
+
+            uint cke = BitSlice(reg50254, 28, 24);
+            uint xp = BitSlice(reg50254, 5, 0);
+
+            uint phyWrd = BitSlice(reg50258, 26, 24);
+            uint phyRdl = BitSlice(reg50258, 23, 16);
+            uint phyWrl = BitSlice(reg50258, 15, 8);
+
+            uint wrpre = BitSlice(reg502A4, 10, 8);
+            uint rdpre = BitSlice(reg502A4, 2, 0);
+
+            // TRFC / TRFC2 – choose first register that isn't the default pattern.
+            uint trfc0 = ReadSmn(offset | 0x50260);
+            uint trfc1 = ReadSmn(offset | 0x50264);
+            uint trfc2 = ReadSmn(offset | 0x50268);
+            uint trfc3 = ReadSmn(offset | 0x5026C);
+            uint trfcReg = 0;
+            foreach (var reg in new[] { trfc0, trfc1, trfc2, trfc3 })
+            {
+                if (reg != 0x00C00138)
+                {
+                    trfcReg = reg;
+                    break;
+                }
+            }
+
+            uint rfc = 0;
+            uint rfc2 = 0;
+            if (trfcReg != 0)
+            {
+                rfc = BitSlice(trfcReg, 15, 0);
+                rfc2 = BitSlice(trfcReg, 31, 16);
+            }
+
+            // RFCsb – first non-zero short value from the RFCsb registers.
+            uint rfcsb0 = BitSlice(ReadSmn(offset | 0x502C0), 10, 0);
+            uint rfcsb1 = BitSlice(ReadSmn(offset | 0x502C4), 10, 0);
+            uint rfcsb2 = BitSlice(ReadSmn(offset | 0x502C8), 10, 0);
+            uint rfcsb3 = BitSlice(ReadSmn(offset | 0x502CC), 10, 0);
+            uint rfcsb = 0;
+            foreach (var v in new[] { rfcsb0, rfcsb1, rfcsb2, rfcsb3 })
+            {
+                if (v != 0)
+                {
+                    rfcsb = v;
+                    break;
+                }
+            }
+
+            // Convert tREFI / tRFC cycles to nanoseconds (as ZenStates-Core Utils.ToNanoseconds)
+            static float ToNanoseconds(uint value, float frequency)
+            {
+                if (frequency <= 0) return 0;
+                float v = value;
+                float ns = v * 2000f / frequency;
+                if (ns > v) ns /= 2f;
+                return ns;
+            }
+
+            float trefiNs = ToNanoseconds(refi, memFreq);
+            float trfcNs = ToNanoseconds(rfc, memFreq);
+            float trfc2Ns = ToNanoseconds(rfc2, memFreq);
+            float trfcsbNs = ToNanoseconds(rfcsb, memFreq);
+
+            model = new DramTimingsModel
+            {
+                Tcl = tcl,
+                Trcd = trcd,
+                Trp = trp,
+                Tras = tras,
+                Trc = trc,
+                Trrds = trrds,
+                Trrdl = trrdl,
+                Tfaw = tfaw,
+                Twr = twr != 0 ? twr : twrs,
+                Tcwl = tcwl,
+                Rtp = rtp,
+                Wtrs = twrs,
+                Wtrl = twrl,
+                Rdwr = rdwr,
+                Wrrd = wrrd,
+                RdrdScl = rdrdScl,
+                WrwrScl = wrwrScl,
+                RdrdSc = rdrdSc,
+                RdrdSd = rdrdSd,
+                RdrdDd = rdrdDd,
+                WrwrSc = wrwrSc,
+                WrwrSd = wrwrSd,
+                WrwrDd = wrwrDd,
+                TrcPage = trcPage,
+                Mod = mod,
+                ModPda = modPda,
+                Mrd = mrd,
+                MrdPda = mrdPda,
+                Stag = stag,
+                StagSb = stagSb,
+                Cke = cke,
+                Xp = xp,
+                PhyWrd = phyWrd,
+                PhyWrl = phyWrl,
+                PhyRdl = phyRdl,
+                Refi = refi,
+                Wrpre = wrpre,
+                Rdpre = rdpre,
+                Rfc = rfc,
+                Rfc2 = rfc2,
+                Rfcsb = rfcsb,
+                TrefiNs = trefiNs,
+                TrfcNs = trfcNs,
+                Trfc2Ns = trfc2Ns,
+                TrfcsbNs = trfcsbNs,
+                GdmEnabled = gdm,
+                PowerDownEnabled = powerDown,
+                Cmd2T = cmd2T ? "2T" : "1T",
+                FrequencyHintMHz = memFreq
+            };
+        }
+        catch
+        {
+            // leave model at defaults
+        }
+
+        return model;
+    }
+}
+

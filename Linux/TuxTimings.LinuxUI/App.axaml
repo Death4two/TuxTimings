@@ -1,0 +1,49 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="TuxTimings.LinuxUI.App"
+             RequestedThemeVariant="Dark">
+  <Application.Styles>
+    <FluentTheme />
+    <Style Selector="Window">
+      <Setter Property="Background" Value="#0D1117" />
+    </Style>
+    <!-- Uniform typography: base 13px, labels muted, values green -->
+    <Style Selector="TextBlock">
+      <Setter Property="FontSize" Value="13" />
+      <Setter Property="Foreground" Value="#E6EDF3" />
+    </Style>
+    <Style Selector="TextBlock.label">
+      <Setter Property="Foreground" Value="#8B949E" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="TextBlock.value-highlight">
+      <Setter Property="Foreground" Value="#3FB950" />
+      <Setter Property="FontSize" Value="14" />
+    </Style>
+    <Style Selector="TextBlock.section-title">
+      <Setter Property="FontSize" Value="15" />
+      <Setter Property="FontWeight" Value="Bold" />
+      <Setter Property="Foreground" Value="#E6EDF3" />
+    </Style>
+    <Style Selector="TextBlock.header-title">
+      <Setter Property="FontSize" Value="22" />
+      <Setter Property="FontWeight" Value="Bold" />
+      <Setter Property="Foreground" Value="#E6EDF3" />
+    </Style>
+    <Style Selector="TextBlock.header-muted">
+      <Setter Property="FontSize" Value="13" />
+      <Setter Property="Foreground" Value="#8B949E" />
+    </Style>
+    <Style Selector="TextBlock.footer-muted">
+      <Setter Property="FontSize" Value="12" />
+      <Setter Property="Foreground" Value="#6E7681" />
+    </Style>
+    <Style Selector="Border.section">
+      <Setter Property="Background" Value="#161B22" />
+      <Setter Property="BorderBrush" Value="#30363D" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="4" />
+      <Setter Property="Padding" Value="8,6" />
+    </Style>
+  </Application.Styles>
+</Application>
