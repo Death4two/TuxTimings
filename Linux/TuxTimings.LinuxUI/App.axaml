@@ -1,9 +1,18 @@
 <Application xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:anim="using:Avalonia.Animation"
              x:Class="TuxTimings.LinuxUI.App"
              RequestedThemeVariant="Dark">
   <Application.Styles>
     <FluentTheme />
+    <!-- Disable theme animations/transitions -->
+    <Style Selector=":is(Control)">
+      <Setter Property="Transitions">
+        <Setter.Value>
+          <anim:Transitions/>
+        </Setter.Value>
+      </Setter>
+    </Style>
     <Style Selector="Window">
       <Setter Property="Background" Value="#0D1117" />
     </Style>

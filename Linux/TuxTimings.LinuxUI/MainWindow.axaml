@@ -3,15 +3,15 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         x:Class="TuxTimings.LinuxUI.MainWindow"
-        Width="900" Height="580"
+        Width="900" Height="620"
         MinWidth="900" MaxWidth="900"
-        MinHeight="580" MaxHeight="580"
+        MinHeight="620" MaxHeight="620"
         CanResize="False"
         Title="TuxTimings"
         Background="#0D1117"
         FontFamily="Segoe UI, Liberation Sans, DejaVu Sans, sans-serif"
         FontSize="13">
-  <Grid RowDefinitions="Auto,Auto,*,Auto" Margin="10">
+  <Grid RowDefinitions="Auto,Auto,*,Auto" Margin="10,10,10,14">
     <!-- Header: processor name centered, then codename/board + app version -->
     <Grid Grid.Row="0" Margin="0,0,0,12" RowDefinitions="Auto,Auto" ColumnDefinitions="*,Auto">
       <TextBlock Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2" Text="{Binding Summary.Cpu.DisplayName}" Classes="header-title" TextAlignment="Center" HorizontalAlignment="Stretch"/>
@@ -228,7 +228,7 @@
     </Grid>
 
     <!-- Footer -->
-    <Grid Grid.Row="3" Grid.ColumnSpan="4" Margin="0,12,0,0" ColumnDefinitions="*,Auto">
+    <Grid Grid.Row="3" Grid.ColumnSpan="4" Margin="0,12,0,4" ColumnDefinitions="*,Auto">
       <TextBlock Grid.Column="0" Classes="footer-muted" VerticalAlignment="Center"
                  Text="DRAM timings &amp; MCLK/UCLK: SMN. Voltages, FCLK, power, core: PM table / zenpower."/>
       <TextBlock Grid.Column="1" Text="DDR5" Classes="value-highlight" FontWeight="SemiBold" VerticalAlignment="Center"/>
