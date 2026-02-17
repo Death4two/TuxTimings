@@ -1,14 +1,3 @@
 #!/bin/sh
-set -e
-BIN="TuxTimings.LinuxUI"
-# Type 2 AppImage runtimes set CWD to the mount point; $0 can be the path to the .AppImage file.
-if [ -x "usr/bin/$BIN" ]; then
-  APPDIR="$(pwd)"
-elif [ -x "$(dirname "$0")/usr/bin/$BIN" ]; then
-  APPDIR="$(cd "$(dirname "$0")" && pwd)"
-else
-  echo "TuxTimings: cannot find usr/bin/$BIN (not running from inside AppImage?)." >&2
-  exit 1
-fi
-export PATH="$APPDIR/usr/bin:$PATH"
-exec "$APPDIR/usr/bin/$BIN" "$@"
+HERE="$(dirname "$(readlink -f "$0")")"
+exec "$HERE/usr/bin/TuxTimings.LinuxUI" "$@"

@@ -2,6 +2,10 @@
 
 ![TuxTimings](screenshot.png "TuxTimings")
 
+### Supported CPUs
+
+At the moment, **only Zen 5 Granite Ridge desktop CPUs** (e.g. Ryzen 9000‑series AM5) are fully supported for PM‑table based telemetry. Other AMD families may start, but sensors and timings are not guaranteed to be correct yet.
+
 ### Building
 
 See [Linux/README.md](Linux/README.md). Requires .NET 8 SDK. The app reads data via the **ryzen_smu** kernel module (build it from [GitHub](https://github.com/amkillam/ryzen_smu/) and load at runtime).
@@ -20,3 +24,4 @@ This project is licensed under the **GNU General Public License v3.0**. See [LIC
 - **[Linux kernel](https://github.com/torvalds/linux)** — SMN/sysfs interface and platform support.
 - **[AMD's public documentation](https://www.amd.com/en/support/tech-docs)** — SMN/PM table and DRAM timing references.
 - **[AppImageKit](https://github.com/AppImage/AppImageKit)** — Used to build the AppImage (see [Linux/README.md](Linux/README.md)).  
+- **Tux icon** — Tux the penguin originally by Larry Ewing, created with GIMP (`lewing@isc.tamu.edu`), used and/or modified under the terms of the original image permission.

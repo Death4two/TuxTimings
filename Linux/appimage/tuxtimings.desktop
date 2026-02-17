@@ -1,9 +1,8 @@
 [Desktop Entry]
 Name=TuxTimings
-Comment=View AMD Ryzen DRAM timings, clocks and voltages (Linux)
-Exec=AppRun
+Comment=AMD Ryzen DRAM timings viewer
+Exec=TuxTimings.LinuxUI
 Icon=tuxtimings
-Type=Application
-Categories=System;Monitor;
 Terminal=false
-StartupNotify=true
+Type=Application
+Categories=System;Utility;

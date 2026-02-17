@@ -72,12 +72,37 @@ public sealed class CpuInfoModel
     public string CodeName { get; init; } = string.Empty;
     public string Package { get; init; } = string.Empty;
     public string SmuVersion { get; init; } = string.Empty;
+    /// <summary>PM table version from ryzen_smu (e.g. 0x620105) or empty when unavailable.</summary>
+    public string PmTableVersion { get; init; } = string.Empty;
 }
 
 public sealed class SmuMetrics
 {
     public float CpuPackagePowerWatts { get; init; }
     public float CpuTempCelsius { get; init; }
+<<<<<<< Updated upstream
+<<<<<<< Updated upstream
+<<<<<<< Updated upstream
+=======
+=======
+>>>>>>> Stashed changes
+=======
+>>>>>>> Stashed changes
+    /// <summary>Per-core/CCD temperatures °C. Primary: PM table indices 317–324 (up to 8). Fallback: k10temp/zenpower CCD temps.</summary>
+    public IReadOnlyList<float> CoreTempsCelsius { get; init; } = Array.Empty<float>();
+    /// <summary>Per-physical-core usage percent (0–100) derived from /proc/stat; cores are SMT pairs averaged.</summary>
+    public IReadOnlyList<float> CoreUsagePercent { get; init; } = Array.Empty<float>();
+    /// <summary>Per-physical-core effective frequency in MHz from cpufreq (scaling_cur_freq), averaged across SMT threads.</summary>
+    public IReadOnlyList<float> CoreFreqMHz { get; init; } = Array.Empty<float>();
+    /// <summary>Tdie from PM table or zenpower/k10temp (°C). Null when unavailable.</summary>
+    public float? TdieCelsius { get; init; }
+    /// <summary>Tctl from k10temp or zenpower (°C). Null when unavailable.</summary>
+    public float? TctlCelsius { get; init; }
+    /// <summary>Tccd1 from k10temp temp3_input (°C). Null if k10temp does not expose it.</summary>
+    public float? Tccd1Celsius { get; init; }
+    /// <summary>Tccd2 from k10temp temp4_input (°C). Null if k10temp does not expose it.</summary>
+    public float? Tccd2Celsius { get; init; }
+>>>>>>> Stashed changes
     public float CoreClockMHz { get; init; }
     public float MemoryClockMHz { get; init; }
     public float FclkMHz { get; init; }
@@ -92,6 +117,8 @@ public sealed class SmuMetrics
     public float MemVdd { get; init; }
     public float MemVddq { get; init; }
     public float MemVpp { get; init; }
+    /// <summary>Per-SPD (DIMM) temperatures °C from spd5118 hwmon (temp1_input).</summary>
+    public IReadOnlyList<float> SpdTempsCelsius { get; init; } = Array.Empty<float>();
 }
 
 public sealed class DramTimingsModel
@@ -163,6 +190,8 @@ public sealed class BoardInfoModel
     public string MotherboardProductName { get; init; } = string.Empty;
     public string BiosVersion { get; init; } = string.Empty;
     public string BiosReleaseDate { get; init; } = string.Empty;
+    /// <summary>AGESA version string parsed from firmware/ACPI tables, e.g. "ComboAM5PI 1.1.9.0". Empty when unavailable.</summary>
+    public string AgesaVersion { get; init; } = string.Empty;
 
     /// <summary>Single line for UI: "Board | BIOS version (date)" or empty.</summary>
     public string DisplayLine
@@ -178,6 +207,8 @@ public sealed class BoardInfoModel
                     ? $"BIOS {BiosVersion}"
                     : $"BIOS {BiosVersion} ({BiosReleaseDate})";
                 parts.Add(bios);
+                if (!string.IsNullOrEmpty(AgesaVersion))
+                    parts.Add($"AGESA {AgesaVersion}");
             }
             return parts.Count == 0 ? string.Empty : string.Join(" | ", parts);
         }

@@ -1,14 +1,19 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using TuxTimings.Core;
+using System.Text;
 
 namespace TuxTimings.LinuxBackend;
 
 public sealed class RyzenSmuBackend : IHardwareBackend
 {
     private const string BasePath = "/sys/kernel/ryzen_smu_drv";
+    // Previous per-CPU times from /proc/stat for usage deltas (key = logical CPU index).
+    // Values are (IdleJiffies, TotalJiffies).
+    private readonly Dictionary<int, (ulong Idle, ulong Total)> _prevCpuTimes = new();
 
     /// <summary>
     /// Fallback: use Python script (same logic as dump_pm_voltages.py) to parse PM table.
@@ -76,7 +81,29 @@ public sealed class RyzenSmuBackend : IHardwareBackend
                 Vddp = values.GetValueOrDefault("VDDP"),
                 VddgIod = values.GetValueOrDefault("VDDG_IOD"),
                 VddgCcd = values.GetValueOrDefault("VDDG_CCD"),
+<<<<<<< Updated upstream
                 VddMisc = values.GetValueOrDefault("VDD_MISC")
+=======
+                VddMisc = values.GetValueOrDefault("VDD_MISC"),
+                Vcore = PlausibleVcore(values.GetValueOrDefault("VCORE")),
+                CpuPackagePowerWatts = values.GetValueOrDefault("POWER"),
+                CpuPptWatts = values.GetValueOrDefault("PPT"),
+                CpuPackageCurrentAmps = values.GetValueOrDefault("CURRENT"),
+                CpuTempCelsius = values.GetValueOrDefault("TEMP"),
+                CoreTempsCelsius = coreTemps,
+                CoreClockMHz = values.GetValueOrDefault("CORE_MHZ"),
+                // Tdie/Tctl/Tccd will be overlaid later from k10temp/zenpower.
+                TdieCelsius = null,
+                TctlCelsius = null,
+                Tccd1Celsius = null,
+                Tccd2Celsius = null
+<<<<<<< Updated upstream
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+=======
+>>>>>>> Stashed changes
+=======
+>>>>>>> Stashed changes
             };
         }
         catch
@@ -186,6 +213,8 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
     {
         var (processorName, partNumbers, motherboardProductName, biosVersion, biosReleaseDate) = ReadDmidecode();
         var codenameIndex = ReadCodenameIndex();
+        var pmVersion = ReadUInt32("pm_table_version");
+        var pmVersionDisplay = pmVersion == 0 ? string.Empty : $"PM table 0x{pmVersion:X8}";
 
         var cpu = new CpuInfoModel
         {
@@ -193,20 +222,19 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
             ProcessorName = processorName,
             CodeName = MapCodename(codenameIndex),
             SmuVersion = ReadString("version"),
-            Package = string.Empty
+            Package = string.Empty,
+            PmTableVersion = pmVersionDisplay
         };
 
         var metrics = ReadMetrics(codenameIndex);
 
-        var isGraniteRidge = codenameIndex == 23;
-        var dramTimings = isGraniteRidge
-            ? ReadGraniteRidgeDdr5Timings()
-            : new DramTimingsModel();
+        var dramTimings = ReadDramTimingsForCodename(codenameIndex);
+        var (memFreqMHz, memType) = GetMemoryConfigForCodename(codenameIndex, dramTimings);
 
         var memory = new MemoryConfigModel
         {
-            Frequency = isGraniteRidge ? dramTimings.FrequencyHintMHz : 0,
-            Type = isGraniteRidge ? MemType.DDR5 : MemType.Unknown,
+            Frequency = memFreqMHz,
+            Type = memType,
             TotalCapacity = ReadTotalMemory(),
             PartNumber = partNumbers
         };
@@ -215,7 +243,8 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
         {
             MotherboardProductName = motherboardProductName,
             BiosVersion = biosVersion,
-            BiosReleaseDate = biosReleaseDate
+            BiosReleaseDate = biosReleaseDate,
+            AgesaVersion = ReadAgesaVersion()
         };
 
         return new SystemSummary
@@ -229,6 +258,66 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
         };
     }
 
+<<<<<<< Updated upstream
+<<<<<<< Updated upstream
+<<<<<<< Updated upstream
+=======
+=======
+>>>>>>> Stashed changes
+=======
+>>>>>>> Stashed changes
+    /// <summary>
+    /// Read fan1–fan7 from Nuvoton Super I/O hwmon devices (e.g. nct6799, nct6798, nct6775, etc.); fan7 = Pump; exclude 0 RPM.
+    /// Matches any hwmon "name" that looks like an NCT67xx/NCT67xx-family or contains "nuvoton".
+    /// </summary>
+    private static IReadOnlyList<FanReading> ReadHwmonFans()
+    {
+        const string hwmonRoot = "/sys/class/hwmon";
+        if (!Directory.Exists(hwmonRoot)) return Array.Empty<FanReading>();
+
+        // Try each Nuvoton hwmon device until we find one with non-zero fan speeds.
+        var result = new List<FanReading>();
+
+        foreach (var dir in Directory.GetDirectories(hwmonRoot))
+        {
+            try
+            {
+                var namePath = Path.Combine(dir, "name");
+                if (!File.Exists(namePath)) continue;
+                var name = File.ReadAllText(namePath).Trim();
+
+                // Typical names: "nct6799", "nct6798", "nct6775", etc., sometimes with suffixes.
+                bool isNuvoton = name.StartsWith("nct6", StringComparison.OrdinalIgnoreCase)
+                                 || name.StartsWith("nct67", StringComparison.OrdinalIgnoreCase)
+                                 || name.Contains("nuvoton", StringComparison.OrdinalIgnoreCase);
+                if (!isNuvoton) continue;
+
+                var list = new List<FanReading>();
+                for (int i = 1; i <= 7; i++)
+                {
+                    var path = Path.Combine(dir, $"fan{i}_input");
+                    if (!File.Exists(path)) continue;
+                    if (!int.TryParse(File.ReadAllText(path).Trim(), out var rpm) || rpm <= 0) continue;
+                    var label = i == 7 ? "Pump" : $"Fan{i}";
+                    list.Add(new FanReading(label, rpm));
+                }
+
+                if (list.Count > 0)
+                {
+                    result = list;
+                    break;
+                }
+            }
+            catch
+            {
+                // Ignore individual hwmon errors and keep searching.
+            }
+        }
+
+        return result;
+    }
+
+>>>>>>> Stashed changes
     private static string ReadString(string fileName)
     {
         var path = Path.Combine(BasePath, fileName);
@@ -346,6 +435,9 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
         return string.Empty;
     }
 
+<<<<<<< Updated upstream
+<<<<<<< Updated upstream
+<<<<<<< Updated upstream
     private static string ParseMemory(string stdout)
     {
         var partNumbers = new List<string>();
@@ -371,9 +463,20 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
     }
 
     private static SmuMetrics ReadMetrics(int codenameIndex)
+=======
+    private SmuMetrics ReadMetrics(int codenameIndex)
+>>>>>>> Stashed changes
+=======
+    private SmuMetrics ReadMetrics(int codenameIndex)
+>>>>>>> Stashed changes
+=======
+    private SmuMetrics ReadMetrics(int codenameIndex)
+>>>>>>> Stashed changes
     {
         // Best-effort: if pm_table is present, read a few floats from it.
         var pmTablePath = Path.Combine(BasePath, "pm_table");
+        SmuMetrics metrics;
+
         if (!File.Exists(pmTablePath))
         {
             if (!_hasDumpedDiagnostic)
@@ -381,50 +484,111 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
                 DumpDiagnostic("pm_table file does not exist", codenameIndex);
                 _hasDumpedDiagnostic = true;
             }
-            return new SmuMetrics();
+            metrics = new SmuMetrics();
         }
-
-        try
+        else
         {
-            // Sysfs can occasionally return stale/empty data on first read; retry once if needed.
-            byte[] bytes = File.ReadAllBytes(pmTablePath);
-            if (bytes.Length < 4)
+            try
             {
-                return new SmuMetrics();
-            }
-
-            var count = bytes.Length / 4;
-            var floats = new float[count];
-            Buffer.BlockCopy(bytes, 0, floats, 0, bytes.Length);
-
-            SmuMetrics baseMetrics;
-
-            if (codenameIndex == 23)
-            {
-                var pmVersion = ReadUInt32("pm_table_version");
-                baseMetrics = ReadGraniteRidgeMetrics(floats, pmVersion);
-
-                // Retry once if we got zeros but table has data (sysfs timing)
-                if (baseMetrics.FclkMHz == 0 && baseMetrics.Vsoc == 0 && count >= 84)
+                // Sysfs can occasionally return stale/empty data on first read; retry once if needed.
+                byte[] bytes = File.ReadAllBytes(pmTablePath);
+                if (bytes.Length < 4)
                 {
-                    bytes = File.ReadAllBytes(pmTablePath);
-                    if (bytes.Length >= 4)
+                    metrics = new SmuMetrics();
+                }
+                else
+                {
+                    var count = bytes.Length / 4;
+                    var floats = new float[count];
+                    Buffer.BlockCopy(bytes, 0, floats, 0, bytes.Length);
+
+                    SmuMetrics baseMetrics;
+
+                    if (codenameIndex == 23)
                     {
-                        count = bytes.Length / 4;
-                        Buffer.BlockCopy(bytes, 0, floats, 0, Math.Min(bytes.Length, floats.Length * 4));
+                        var pmVersion = ReadUInt32("pm_table_version");
                         baseMetrics = ReadGraniteRidgeMetrics(floats, pmVersion);
+
+                        // Retry once if we got zeros but table has data (sysfs timing)
+                        if (baseMetrics.FclkMHz == 0 && baseMetrics.Vsoc == 0 && count >= 84)
+                        {
+                            bytes = File.ReadAllBytes(pmTablePath);
+                            if (bytes.Length >= 4)
+                            {
+                                count = bytes.Length / 4;
+                                Buffer.BlockCopy(bytes, 0, floats, 0, Math.Min(bytes.Length, floats.Length * 4));
+                                baseMetrics = ReadGraniteRidgeMetrics(floats, pmVersion);
+                            }
+                            // If still zeros, try Python (same logic as dump_pm_voltages.py)
+                            if (baseMetrics.FclkMHz == 0 && baseMetrics.Vsoc == 0)
+                            {
+                                var pyMetrics = TryReadPmTableViaPython();
+                                if (pyMetrics is { } m && (m.FclkMHz > 0 || m.Vsoc > 0))
+                                    baseMetrics = m;
+                            }
+                        }
                     }
-                    // If still zeros, try Python (same logic as dump_pm_voltages.py)
-                    if (baseMetrics.FclkMHz == 0 && baseMetrics.Vsoc == 0)
+                    else
                     {
-                        var pyMetrics = TryReadPmTableViaPython();
-                        if (pyMetrics is { } m && (m.FclkMHz > 0 || m.Vsoc > 0))
-                            baseMetrics = m;
+                        // Generic fallback: try plausible indices for power/core/current/temp (same logic as parse_pm_table.py).
+                        float cpuPower = TryPlausiblePower(floats);
+                        float coreClock = TryPlausibleCoreClock(floats);
+                        float packageCurrent = TryPlausibleCurrent(floats);
+                        float cpuTemp = TryPlausibleTemp(floats);
+                        float memClock = count > 3 ? floats[3] : 0;
+                        if (coreClock == 0 && count > 2) { float v = floats[2]; if (v >= 0.5f && v <= 6.5f) coreClock = v * 1000f; else if (v >= 500f && v <= 6500f) coreClock = v; }
+                        if (coreClock == 0) coreClock = TryReadCpufreqMHz();
+
+                        var (pptW, coreTemps, tdieC, coreClocksGhz) = ReadKnownPmIndices(floats);
+                        if (coreClocksGhz.Length > 0)
+                        {
+                            float maxGhz = coreClocksGhz[0];
+                            for (int i = 1; i < coreClocksGhz.Length; i++)
+                                if (coreClocksGhz[i] > maxGhz) maxGhz = coreClocksGhz[i];
+                            if (maxGhz >= 0.5f && maxGhz <= 6.5f) coreClock = maxGhz * 1000f;
+                        }
+                        if (tdieC > 0) cpuTemp = tdieC;
+                        else if (cpuTemp == 0) cpuTemp = TryPlausibleTemp(floats);
+
+                        baseMetrics = new SmuMetrics
+                        {
+                            CpuPackagePowerWatts = cpuPower,
+                            CpuPptWatts = pptW,
+                            CpuPackageCurrentAmps = packageCurrent,
+                            Vcore = 0f,
+                            CpuTempCelsius = cpuTemp,
+                            CoreTempsCelsius = coreTemps,
+                            CoreClockMHz = coreClock,
+                            CoreClocksGhz = coreClocksGhz,
+                            MemoryClockMHz = memClock,
+                            // Tdie from PM table if available.
+                            TdieCelsius = tdieC > 0 ? tdieC : null,
+                            TctlCelsius = null,
+                            Tccd1Celsius = null,
+                            Tccd2Celsius = null
+                        };
+                    }
+
+                    // Overlay with zenpower3 hwmon values if available.
+                    metrics = ApplyZenpowerOverrides(baseMetrics);
+                    // If PM table did not provide per-core temps, use k10temp CCD temps (temp3–temp10 = Tccd1–Tccd8).
+                    metrics = ApplyK10TempCoreTempFallback(metrics);
+                    // Tctl, Tccd1, Tccd2 from k10temp (temp1, temp3, temp4); Tccd2 only when exposed.
+                    metrics = ApplyK10TempTctlTccdOverlay(metrics);
+
+                    // Dump PM table and parsed values on first successful read (at startup).
+                    if (!_hasDumpedOnce)
+                    {
+                        DumpPmTable(bytes, metrics, codenameIndex);
+                        _hasDumpedOnce = true;
                     }
                 }
             }
-            else
+            catch
             {
+<<<<<<< Updated upstream
+<<<<<<< Updated upstream
+<<<<<<< Updated upstream
                 // Generic fallback: just surface first few entries.
                 float cpuPower = count > 0 ? floats[0] : 0;
                 float cpuTemp = count > 1 ? floats[1] : 0;
@@ -451,9 +615,107 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
             }
 
             return metrics;
+=======
+                if (!_hasDumpedDiagnostic)
+                {
+                    DumpDiagnostic("Exception while reading pm_table", codenameIndex);
+                    _hasDumpedDiagnostic = true;
+                }
+                // Fallback: Python script (same as dump_pm_voltages.py) can read sysfs when C# throws
+                if (codenameIndex == 23)
+                {
+                    var pyMetrics = TryReadPmTableViaPython();
+                    if (pyMetrics is { } m && (m.FclkMHz > 0 || m.Vsoc > 0))
+                    {
+                        metrics = ApplyZenpowerOverrides(m);
+                        metrics = ApplyK10TempCoreTempFallback(metrics);
+                        metrics = ApplyK10TempTctlTccdOverlay(metrics);
+                    }
+                    else
+                    {
+                        metrics = new SmuMetrics();
+                    }
+                }
+                else
+                {
+                    metrics = new SmuMetrics();
+                }
+            }
+>>>>>>> Stashed changes
+=======
+                if (!_hasDumpedDiagnostic)
+                {
+                    DumpDiagnostic("Exception while reading pm_table", codenameIndex);
+                    _hasDumpedDiagnostic = true;
+                }
+                // Fallback: Python script (same as dump_pm_voltages.py) can read sysfs when C# throws
+                if (codenameIndex == 23)
+                {
+                    var pyMetrics = TryReadPmTableViaPython();
+                    if (pyMetrics is { } m && (m.FclkMHz > 0 || m.Vsoc > 0))
+                    {
+                        metrics = ApplyZenpowerOverrides(m);
+                        metrics = ApplyK10TempCoreTempFallback(metrics);
+                        metrics = ApplyK10TempTctlTccdOverlay(metrics);
+                    }
+                    else
+                    {
+                        metrics = new SmuMetrics();
+                    }
+                }
+                else
+                {
+                    metrics = new SmuMetrics();
+                }
+            }
+>>>>>>> Stashed changes
+=======
+                if (!_hasDumpedDiagnostic)
+                {
+                    DumpDiagnostic("Exception while reading pm_table", codenameIndex);
+                    _hasDumpedDiagnostic = true;
+                }
+                // Fallback: Python script (same as dump_pm_voltages.py) can read sysfs when C# throws
+                if (codenameIndex == 23)
+                {
+                    var pyMetrics = TryReadPmTableViaPython();
+                    if (pyMetrics is { } m && (m.FclkMHz > 0 || m.Vsoc > 0))
+                    {
+                        metrics = ApplyZenpowerOverrides(m);
+                        metrics = ApplyK10TempCoreTempFallback(metrics);
+                        metrics = ApplyK10TempTctlTccdOverlay(metrics);
+                    }
+                    else
+                    {
+                        metrics = new SmuMetrics();
+                    }
+                }
+                else
+                {
+                    metrics = new SmuMetrics();
+                }
+            }
+>>>>>>> Stashed changes
         }
-        catch
+
+        // Overlay SPD (DIMM) temperatures from spd5118 hwmon.
+        metrics = ApplySpdTempsOverlay(metrics);
+        // Always overlay per-core usage/frequency from /proc/stat + cpufreq on top of whatever metrics we have.
+        metrics = ApplyProcStatCoreUsage(metrics);
+        return metrics;
+    }
+
+    /// <summary>
+    /// Select DRAM timings reader based on codename index (from ryzen_smu codename file).
+    /// Granite Ridge (23) uses DDR5 reader; common desktop DDR4 families use generic DDR4 reader.
+    /// </summary>
+    private static DramTimingsModel ReadDramTimingsForCodename(int codenameIndex)
+    {
+        return codenameIndex switch
         {
+<<<<<<< Updated upstream
+<<<<<<< Updated upstream
+<<<<<<< Updated upstream
             if (!_hasDumpedDiagnostic)
             {
                 DumpDiagnostic("Exception while reading pm_table", codenameIndex);
@@ -468,6 +730,35 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
             }
             return new SmuMetrics();
         }
+=======
+=======
+>>>>>>> Stashed changes
+=======
+>>>>>>> Stashed changes
+            23 => ReadGraniteRidgeDdr5Timings(),   // Granite Ridge DDR5
+            4 or 9 or 10 or 12 or 18 or 19 => ReadGenericDdr4Timings(), // Matisse, Summit, Pinnacle, Vermeer, Naples, Chagall (DDR4 desktop/HEDT)
+            _ => new DramTimingsModel()
+        };
+    }
+
+    /// <summary>
+    /// Decide MemoryConfig frequency and type from codename + timing hint.
+    /// </summary>
+    private static (float FrequencyMHz, MemType Type) GetMemoryConfigForCodename(int codenameIndex, DramTimingsModel dram)
+    {
+        return codenameIndex switch
+        {
+            23 => (dram.FrequencyHintMHz, MemType.DDR5),
+            4 or 9 or 10 or 12 or 18 or 19 => (dram.FrequencyHintMHz, MemType.DDR4),
+            _ => (0f, MemType.Unknown)
+        };
+<<<<<<< Updated upstream
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+=======
+>>>>>>> Stashed changes
+=======
+>>>>>>> Stashed changes
     }
 
     private static uint ReadSmn(uint address)
@@ -494,10 +785,22 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
     private static uint ReadUInt32(string fileName)
     {
         var path = Path.Combine(BasePath, fileName);
-        if (!File.Exists(path)) return 0;
-        var bytes = File.ReadAllBytes(path);
-        if (bytes.Length < 4) return 0;
-        return BitConverter.ToUInt32(bytes, 0);
+        try
+        {
+            if (!File.Exists(path)) return 0;
+            // sysfs entries like pm_table_version can report a logical length
+            // but allow fewer bytes to be read, so avoid File.ReadAllBytes
+            // and instead read up to 4 bytes safely.
+            using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            Span<byte> buf = stackalloc byte[4];
+            var read = fs.Read(buf);
+            if (read < 4) return 0;
+            return BitConverter.ToUInt32(buf);
+        }
+        catch
+        {
+            return 0;
+        }
     }
 
     private static string ReadTotalMemory()
@@ -605,6 +908,7 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
         float vddgCcd = Get(pt, offsetCldoVddgCcd);
         float vddMisc = Get(pt, offsetVddMisc);
 
+<<<<<<< Updated upstream
             return new SmuMetrics
             {
                 FclkMHz = fclk,
@@ -616,6 +920,510 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
                 VddgCcd = vddgCcd,
                 VddMisc = vddMisc
             };
+=======
+        var (pptW, coreTemps, tdieC, coreClocksGhz) = ReadKnownPmIndices(pt);
+        if (coreClocksGhz.Length > 0)
+        {
+            float maxGhz = coreClocksGhz[0];
+            for (int i = 1; i < coreClocksGhz.Length; i++)
+                if (coreClocksGhz[i] > maxGhz) maxGhz = coreClocksGhz[i];
+            if (maxGhz >= 0.5f && maxGhz <= 6.5f) coreClock = maxGhz * 1000f;
+        }
+
+        float cpuTemp = tdieC > 0 ? tdieC : TryPlausibleTemp(pt);
+
+        // PM table index 271 = core voltage (Granite Ridge, from watch_pm_table)
+        float vcore = 271 < pt.Length ? PlausibleVcore(pt[271]) : 0f;
+        return new SmuMetrics
+        {
+            CpuPackagePowerWatts = packagePower,
+            CpuPptWatts = pptW,
+            CpuPackageCurrentAmps = packageCurrent,
+            Vcore = vcore,
+            CpuTempCelsius = cpuTemp,
+            CoreTempsCelsius = coreTemps,
+            CoreClockMHz = coreClock,
+            CoreClocksGhz = coreClocksGhz,
+            FclkMHz = fclk,
+            UclkMHz = uclk,
+            MclkMHz = mclk,
+            Vsoc = vsoc,
+            Vddp = vddp,
+            VddgIod = vddgIod,
+            VddgCcd = vddgCcd,
+            VddMisc = vddMisc,
+            // Tdie will be overlaid later from PM table (ReadKnownPmIndices) or zenpower/k10temp.
+            TdieCelsius = null,
+            TctlCelsius = null,
+            Tccd1Celsius = null,
+            Tccd2Celsius = null
+        };
+    }
+
+    /// <summary>Read current CPU frequency from Linux cpufreq (kHz → MHz). Returns 0 if unavailable.</summary>
+    private static float TryReadCpufreqMHz()
+    {
+        try
+        {
+            for (int i = 0; i < 64; i++)
+            {
+                var path = $"/sys/devices/system/cpu/cpu{i}/cpufreq/scaling_cur_freq";
+                if (!File.Exists(path)) continue;
+                var s = File.ReadAllText(path).Trim();
+                if (int.TryParse(s, out var khz) && khz > 0) return khz / 1000f;
+            }
+        }
+        catch { }
+        return 0;
+    }
+
+    /// <summary>Read known PM table indices: 3/26 = CPU PPT (W), 317–324 = core temps (°C), 448/449 = tdie (°C), 325–340 = core clocks (GHz).</summary>
+    private static (float PptWatts, float[] CoreTemps, float TdieCelsius, float[] CoreClocksGhz) ReadKnownPmIndices(float[] pt)
+    {
+        float ppt = 0;
+        if (pt != null && pt.Length > 26)
+        {
+            float v3 = pt[3], v26 = pt[26];
+            if (v3 >= 1f && v3 <= 400f) ppt = v3;
+            else if (v26 >= 1f && v26 <= 400f) ppt = v26;
+        }
+
+        float[] coreTemps = Array.Empty<float>();
+        if (pt != null && pt.Length > 324)
+        {
+            coreTemps = new float[8];
+            for (int i = 0; i < 8; i++)
+                coreTemps[i] = pt[317 + i];
+        }
+
+        float tdie = 0;
+        if (pt != null && pt.Length > 449)
+        {
+            float a = pt[448], b = pt[449];
+            if (a >= 1f && a <= 150f) tdie = a;
+            else if (b >= 1f && b <= 150f) tdie = b;
+            else if (a > 0 && b > 0) tdie = (a + b) * 0.5f;
+        }
+
+        float[] coreClocksGhz = Array.Empty<float>();
+        if (pt != null && pt.Length > 340)
+        {
+            coreClocksGhz = new float[16];
+            for (int i = 0; i < 16; i++)
+                coreClocksGhz[i] = pt[325 + i];
+        }
+
+        return (ppt, coreTemps, tdie, coreClocksGhz);
+    }
+
+    /// <summary>Try candidate float indices for package power (W). Plausible: 0.5–400 W.</summary>
+    private static float TryPlausiblePower(float[] pt)
+    {
+        if (pt == null || pt.Length == 0) return 0;
+        int[] candidates = { 220, 187, 29, 42, 0, 1 }; // 220/187 from PM table dumps, then SOCKET_POWER, CPU_TELEMETRY_POWER, early
+        foreach (var i in candidates)
+        {
+            if (i >= pt.Length) continue;
+            float v = pt[i];
+            if (v >= 0.5f && v <= 400f) return v;
+        }
+        return 0;
+    }
+
+    /// <summary>Try candidate indices for core frequency (MHz). Plausible: 500–6500 MHz.</summary>
+    private static float TryPlausibleCoreClock(float[] pt)
+    {
+        if (pt == null || pt.Length == 0) return 0;
+        int[] candidates = { 2, 48, 49 }; // early layout; FCLK_FREQ/FCLK_FREQ_EFF in 0x240903 (kHz? check)
+        foreach (var i in candidates)
+        {
+            if (i >= pt.Length) continue;
+            float v = pt[i];
+            if (v >= 500f && v <= 6500f) return v;
+            if (v >= 0.5f && v <= 6.5f) return v * 1000f; // might be in GHz
+        }
+        return 0;
+    }
+
+    /// <summary>Try candidate indices for package current (A). Plausible: 0.5–200 A.</summary>
+    private static float TryPlausibleCurrent(float[] pt)
+    {
+        if (pt == null || pt.Length == 0) return 0;
+        int[] candidates = { 41, 46, 3, 10, 11, 4 }; // CPU_TELEMETRY_CURRENT, SOC, TDC/EDC; 10,11 from dumps
+        foreach (var i in candidates)
+        {
+            if (i >= pt.Length) continue;
+            float v = pt[i];
+            if (v >= 0.5f && v <= 200f) return v;
+        }
+        return 0;
+    }
+
+    /// <summary>Try candidate indices for CPU temp / tdie (°C). Plausible: 1–150 °C.</summary>
+    private static float TryPlausibleTemp(float[] pt)
+    {
+        if (pt == null || pt.Length == 0) return 0;
+        int[] candidates = { 1, 448, 449 }; // early temp, tdie
+        foreach (var i in candidates)
+        {
+            if (i >= pt.Length) continue;
+            float v = pt[i];
+            if (v >= 1f && v <= 150f) return v;
+        }
+        return 0;
+    }
+
+    /// <summary>Return value if in plausible core voltage range (0.25–2.2 V), else 0.</summary>
+    private static float PlausibleVcore(float v)
+    {
+        return v >= 0.25f && v <= 2.2f ? v : 0f;
+    }
+
+    /// <summary>
+    /// Best-effort AGESA version reader for Linux.
+    /// Mirrors ZenStates-Core: first scan the legacy BIOS region (0xE0000–0xFFFFF) via /dev/mem for the
+    /// "AGESA!V9" marker, then fall back to ACPI tables under /sys/firmware/acpi/tables.
+    /// Returns empty string when no AGESA marker is found or access is not permitted.
+    /// </summary>
+    private static string ReadAgesaVersion()
+    {
+        try
+        {
+            // 1) Primary: scan legacy BIOS region like ZenStates-Core Cpu.GetAgesaVersion
+            const long biosBase = 0xE0000;
+            const int biosLength = 0x100000 - 0xE0000; // 0xFFFFF - 0xE0000 + 1
+            const string devMem = "/dev/mem";
+            if (File.Exists(devMem))
+            {
+                try
+                {
+                    using var fs = new FileStream(devMem, FileMode.Open, FileAccess.Read, FileShare.Read);
+                    if (fs.Length >= biosBase + biosLength)
+                    {
+                        fs.Position = biosBase;
+                        var buf = new byte[biosLength];
+                        int read = fs.Read(buf, 0, buf.Length);
+                        if (read > 0)
+                        {
+                            var v = ParseAgesaVersion(buf);
+                            if (!string.IsNullOrEmpty(v))
+                                return v;
+                        }
+                    }
+                }
+                catch
+                {
+                    // /dev/mem may be restricted; ignore and fall back to ACPI tables
+                }
+            }
+
+            // 2) Fallback: search common ACPI tables exposed by the kernel.
+            var candidatePaths = new[]
+            {
+                "/sys/firmware/acpi/tables/DSDT",
+                "/sys/firmware/acpi/tables/FACP",
+                "/sys/firmware/acpi/tables/XSDT",
+                "/sys/firmware/acpi/tables/RSDT"
+            };
+
+            foreach (var path in candidatePaths)
+            {
+                if (!File.Exists(path)) continue;
+                var bytes = File.ReadAllBytes(path);
+                var v = ParseAgesaVersion(bytes);
+                if (!string.IsNullOrEmpty(v))
+                    return v;
+            }
+        }
+        catch
+        {
+            // ignore ACPI/permissions issues
+        }
+
+        return string.Empty;
+    }
+
+    // ---------- AGESA parsing helpers (adapted from ZenStates-Core AgesaUtils) ----------
+
+    private static readonly bool[] AgesaAllowedChars = BuildAgesaAllowedTable();
+
+    private static string ParseAgesaVersion(byte[] source)
+    {
+        if (source == null || source.Length == 0) return string.Empty;
+
+        byte[] marker = Encoding.ASCII.GetBytes("AGESA!V9");
+        int markerOffset = FindSequence(source, marker);
+        if (markerOffset < 0) return string.Empty;
+
+        int versionStart = markerOffset + marker.Length;
+        versionStart = FindFirstAllowed(source, versionStart);
+        if (versionStart < 0) return string.Empty;
+        int versionEnd = FindFirstInvalid(source, versionStart);
+
+        if (versionEnd > versionStart)
+        {
+            return Encoding.ASCII.GetString(source, versionStart, versionEnd - versionStart)
+                .Trim('\0', ' ');
+        }
+
+        return string.Empty;
+    }
+
+    private static int FindSequence(byte[] data, byte[] pattern)
+    {
+        if (data.Length == 0 || pattern.Length == 0 || pattern.Length > data.Length)
+            return -1;
+
+        for (int i = 0; i <= data.Length - pattern.Length; i++)
+        {
+            bool match = true;
+            for (int j = 0; j < pattern.Length; j++)
+            {
+                if (data[i + j] != pattern[j])
+                {
+                    match = false;
+                    break;
+                }
+            }
+            if (match) return i;
+        }
+        return -1;
+    }
+
+    private static int FindFirstInvalid(byte[] data, int startIndex = 0)
+    {
+        for (int i = startIndex; i < data.Length; i++)
+        {
+            if (!AgesaAllowedChars[data[i]])
+                return i;
+        }
+        return data.Length;
+    }
+
+    private static int FindFirstAllowed(byte[] data, int startIndex = 0)
+    {
+        for (int i = startIndex; i < data.Length; i++)
+        {
+            if (AgesaAllowedChars[data[i]])
+                return i;
+        }
+        return -1;
+    }
+
+    private static bool[] BuildAgesaAllowedTable()
+    {
+        var table = new bool[256];
+
+        for (int c = '0'; c <= '9'; c++) table[c] = true;
+        for (int c = 'A'; c <= 'Z'; c++) table[c] = true;
+        for (int c = 'a'; c <= 'z'; c++) table[c] = true;
+
+        table[' '] = true;
+        table['.'] = true;
+        table['-'] = true;
+
+        return table;
+    }
+
+    /// <summary>
+    /// Generic DDR4 reader using the same UMC register layout as ZenStates-Core DDR4Dictionary.
+    /// Uses UMC0 (offset 0) only, like the existing Granite Ridge DDR5 reader.
+    /// </summary>
+    private static DramTimingsModel ReadGenericDdr4Timings()
+    {
+        var model = new DramTimingsModel();
+
+        try
+        {
+            const uint offset = 0; // UMC0
+
+            // Primary and secondary timings using DDR4Dictionary map (same offsets as DDR5Dictionary, different platform).
+            uint reg50204 = ReadSmn(offset | 0x50204);
+            uint reg50208 = ReadSmn(offset | 0x50208);
+            uint reg5020C = ReadSmn(offset | 0x5020C);
+            uint reg50210 = ReadSmn(offset | 0x50210);
+            uint reg50214 = ReadSmn(offset | 0x50214);
+            uint reg50218 = ReadSmn(offset | 0x50218);
+            uint reg5021C = ReadSmn(offset | 0x5021C);
+            uint reg50220 = ReadSmn(offset | 0x50220);
+            uint reg50224 = ReadSmn(offset | 0x50224);
+            uint reg50228 = ReadSmn(offset | 0x50228);
+            uint reg50230 = ReadSmn(offset | 0x50230);
+            uint reg50234 = ReadSmn(offset | 0x50234);
+            uint reg50250 = ReadSmn(offset | 0x50250);
+            uint reg50254 = ReadSmn(offset | 0x50254);
+            uint reg50258 = ReadSmn(offset | 0x50258);
+            uint reg502A4 = ReadSmn(offset | 0x502A4);
+
+            uint tcl = BitSlice(reg50204, 5, 0);
+            uint trcdRd = BitSlice(reg50204, 21, 16);
+            uint trcdWr = BitSlice(reg50204, 29, 24);
+            if (trcdWr == 0) trcdWr = trcdRd;
+            uint tras = BitSlice(reg50204, 14, 8);
+            uint trp = BitSlice(reg50208, 21, 16);
+            uint trc = BitSlice(reg50208, 7, 0);
+
+            uint trrds = BitSlice(reg5020C, 4, 0);
+            uint trrdl = BitSlice(reg5020C, 12, 8);
+            uint tfaw = BitSlice(reg50210, 7, 0);
+            uint rtp = BitSlice(reg5020C, 28, 24);
+            uint twrs = BitSlice(reg50214, 12, 8);
+            uint twrl = BitSlice(reg50214, 22, 16);
+            uint tcwl = BitSlice(reg50214, 5, 0);
+            uint twr = BitSlice(reg50218, 7, 0);
+
+            uint trcPage = BitSlice(reg5021C, 31, 20);
+
+            uint rdrdScl = BitSlice(reg50220, 29, 24);
+            uint rdrdSc = BitSlice(reg50220, 19, 16);
+            uint rdrdSd = BitSlice(reg50220, 11, 8);
+            uint rdrdDd = BitSlice(reg50220, 3, 0);
+
+            uint wrwrScl = BitSlice(reg50224, 29, 24);
+            uint wrwrSc = BitSlice(reg50224, 19, 16);
+            uint wrwrSd = BitSlice(reg50224, 11, 8);
+            uint wrwrDd = BitSlice(reg50224, 3, 0);
+
+            uint rdwr = BitSlice(reg50228, 13, 8);
+            uint wrrd = BitSlice(reg50228, 3, 0);
+
+            uint refi = BitSlice(reg50230, 15, 0);
+
+            uint modPda = BitSlice(reg50234, 29, 24);
+            uint mrdPda = BitSlice(reg50234, 21, 16);
+            uint mod = BitSlice(reg50234, 13, 8);
+            uint mrd = BitSlice(reg50234, 5, 0);
+
+            uint stag = BitSlice(reg50250, 26, 16);
+            uint stagSb = BitSlice(reg50250, 8, 0);
+
+            uint cke = BitSlice(reg50254, 28, 24);
+            uint xp = BitSlice(reg50254, 5, 0);
+
+            uint phyWrd = BitSlice(reg50258, 26, 24);
+            uint phyRdl = BitSlice(reg50258, 23, 16);
+            uint phyWrl = BitSlice(reg50258, 15, 8);
+
+            uint wrpre = BitSlice(reg502A4, 10, 8);
+            uint rdpre = BitSlice(reg502A4, 2, 0);
+
+            // TRFC / TRFC2 – as in ZenStates-Core DDR4: first non-default value from 0x50260/0x50264.
+            uint trfc0 = ReadSmn(offset | 0x50260);
+            uint trfc1 = ReadSmn(offset | 0x50264);
+            uint trfcReg = trfc0 != trfc1 ? (trfc0 != 0x21060138 ? trfc0 : trfc1) : trfc0;
+
+            uint rfc = 0;
+            uint rfc2 = 0;
+            if (trfcReg != 0)
+            {
+                rfc = BitSlice(trfcReg, 10, 0);
+                rfc2 = BitSlice(trfcReg, 21, 11);
+            }
+
+            // For now we don't compute ns values for DDR4; leave them 0.
+
+            model = new DramTimingsModel
+            {
+                Tcl = tcl,
+                TrcdRd = trcdRd,
+                TrcdWr = trcdWr,
+                Trp = trp,
+                Tras = tras,
+                Trc = trc,
+                Trrds = trrds,
+                Trrdl = trrdl,
+                Tfaw = tfaw,
+                Twr = twr != 0 ? twr : twrs,
+                Tcwl = tcwl,
+                Rtp = rtp,
+                Wtrs = twrs,
+                Wtrl = twrl,
+                Rdwr = rdwr,
+                Wrrd = wrrd,
+                RdrdScl = rdrdScl,
+                WrwrScl = wrwrScl,
+                RdrdSc = rdrdSc,
+                RdrdSd = rdrdSd,
+                RdrdDd = rdrdDd,
+                WrwrSc = wrwrSc,
+                WrwrSd = wrwrSd,
+                WrwrDd = wrwrDd,
+                TrcPage = trcPage,
+                Mod = mod,
+                ModPda = modPda,
+                Mrd = mrd,
+                MrdPda = mrdPda,
+                Stag = stag,
+                StagSb = stagSb,
+                Cke = cke,
+                Xp = xp,
+                PhyWrd = phyWrd,
+                PhyWrl = phyWrl,
+                PhyRdl = phyRdl,
+                Refi = refi,
+                Wrpre = wrpre,
+                Rdpre = rdpre,
+                Rfc = rfc,
+                Rfc2 = rfc2,
+                // Ns fields left at 0 for DDR4 for now.
+                GdmEnabled = false,
+                PowerDownEnabled = false,
+                Cmd2T = string.Empty,
+                FrequencyHintMHz = 0
+            };
+        }
+        catch
+        {
+            // leave model at defaults
+        }
+
+        return model;
+    }
+
+    // SVI2 telemetry SMN addresses. Family 17h (Zen1–Zen3) from zenpower/LibreHardwareMonitor.
+    // Zen 5 (Family 1Ah / Granite Ridge): no public SVI2 spec; we try the same base in case SMU kept compatibility.
+    private const uint Svi2Plane0Addr = 0x0005A00C; // Core for Zen1, SoC for Zen2 Ryzen
+    private const uint Svi2Plane1Addr = 0x0005A010; // SoC for Zen1, Core for Zen2 Ryzen
+
+    /// <summary>Read SVI2 telemetry via SMN (voltage/current). Formulas from zenpower; Zen2 current scale. Zen 5: same addresses tried.</summary>
+    private static (float CoreV, float CoreA, float SocV, float SocA)? TryReadSvi2Telemetry()
+    {
+        try
+        {
+            uint p0 = ReadSmn(Svi2Plane0Addr);
+            uint p1 = ReadSmn(Svi2Plane1Addr);
+
+            static float PlaneToVoltageMV(uint plane)
+            {
+                uint vddCor = (plane >> 16) & 0xFF;
+                return 1550f - (625f * vddCor / 100f); // mV
+            }
+
+            // Zen2 current scale (658.823 * idd); idd = low 8 bits. Result mA.
+            static float PlaneToCurrentMA(uint plane)
+            {
+                uint idd = plane & 0xFF;
+                return (658823f * idd) / 1000f;
+            }
+
+            float v0 = PlaneToVoltageMV(p0) / 1000f;
+            float a0 = PlaneToCurrentMA(p0) / 1000f;
+            float v1 = PlaneToVoltageMV(p1) / 1000f;
+            float a1 = PlaneToCurrentMA(p1) / 1000f;
+
+            // Plausible: V 0.3–2 V, A 0.01–200 A
+            bool ok0 = v0 >= 0.3f && v0 <= 2f && a0 >= 0.01f && a0 <= 200f;
+            bool ok1 = v1 >= 0.3f && v1 <= 2f && a1 >= 0.01f && a1 <= 200f;
+            if (!ok0 && !ok1) return null;
+
+            // Report plane0 as Core, plane1 as SoC (Zen1 order); on Zen2 they're swapped but both rails are valid
+            return (v0, a0, v1, a1);
+        }
+        catch
+        {
+            return null;
+        }
+>>>>>>> Stashed changes
     }
 
     private static SmuMetrics ApplyZenpowerOverrides(SmuMetrics metrics)
@@ -673,8 +1481,22 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
 
             return new SmuMetrics
             {
+<<<<<<< Updated upstream
                 CpuPackagePowerWatts = metrics.CpuPackagePowerWatts,
                 CpuTempCelsius = metrics.CpuTempCelsius,
+=======
+                CpuPackagePowerWatts = powerW,
+                // Use RAPL_P_Package as backup for PPT if PM table PPT is missing.
+                CpuPptWatts = metrics.CpuPptWatts > 0 ? metrics.CpuPptWatts : powerW,
+                CpuPackageCurrentAmps = currentA,
+                Vcore = metrics.Vcore,
+                CpuTempCelsius = metrics.CpuTempCelsius,
+                CoreTempsCelsius = metrics.CoreTempsCelsius,
+                TdieCelsius = metrics.TdieCelsius,
+                TctlCelsius = metrics.TctlCelsius,
+                Tccd1Celsius = metrics.Tccd1Celsius,
+                Tccd2Celsius = metrics.Tccd2Celsius,
+>>>>>>> Stashed changes
                 CoreClockMHz = metrics.CoreClockMHz,
                 MemoryClockMHz = metrics.MemoryClockMHz,
                 FclkMHz = metrics.FclkMHz,
@@ -697,6 +1519,695 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
         }
     }
 
+<<<<<<< Updated upstream
+=======
+    private static bool TryReadHwmonFloat(string hwmonDir, string file, out float value)
+    {
+        value = 0;
+        var path = Path.Combine(hwmonDir, file);
+        if (!File.Exists(path)) return false;
+        return float.TryParse(File.ReadAllText(path).Trim(), out value);
+    }
+
+    /// <summary>
+    /// Read per-CCD/per-core temperatures from hwmon. Tries (1) k10temp: temp3–temp10 = Tccd1–Tccd8;
+    /// (2) zenpower: temp*_input when k10temp not present. temp*_input is millidegrees; we return °C.
+    /// Used as fallback when PM table core temps are missing.
+    /// </summary>
+    private static IReadOnlyList<float> ReadK10TempCoreTemps()
+    {
+        const string hwmonRoot = "/sys/class/hwmon";
+        if (!Directory.Exists(hwmonRoot)) return Array.Empty<float>();
+
+        string? basePath = null;
+        bool isK10 = false;
+        foreach (var dir in Directory.GetDirectories(hwmonRoot))
+        {
+            var namePath = Path.Combine(dir, "name");
+            if (!File.Exists(namePath)) continue;
+            var name = File.ReadAllText(namePath).Trim();
+            if (name.Equals("k10temp", StringComparison.OrdinalIgnoreCase))
+            {
+                basePath = dir;
+                isK10 = true;
+                break;
+            }
+            if (name.Contains("zenpower", StringComparison.OrdinalIgnoreCase) && basePath == null)
+                basePath = dir;
+        }
+        if (string.IsNullOrEmpty(basePath)) return Array.Empty<float>();
+
+        var list = new List<float>();
+        if (isK10)
+        {
+            // k10temp: temp3 = Tccd1 .. temp10 = Tccd8
+            for (int i = 3; i <= 10; i++)
+                TryAddTempInput(basePath, i, list);
+        }
+        else
+        {
+            // zenpower: scan temp1_input, temp2_input, ... and take plausible values
+            for (int i = 1; i <= 10; i++)
+                TryAddTempInput(basePath, i, list);
+        }
+        return list;
+    }
+
+    private static void TryAddTempInput(string hwmonDir, int index, List<float> list)
+    {
+        var path = Path.Combine(hwmonDir, $"temp{index}_input");
+        if (!File.Exists(path)) return;
+        if (!int.TryParse(File.ReadAllText(path).Trim(), out var raw)) return;
+        float celsius = raw / 1000f; // millidegrees -> °C
+        if (celsius >= 0f && celsius <= 150f)
+            list.Add(celsius);
+    }
+
+    /// <summary>If PM table core temps are empty or all zero, fill from k10temp CCD temps (alternative source).</summary>
+    private static SmuMetrics ApplyK10TempCoreTempFallback(SmuMetrics metrics)
+    {
+        var fromPm = metrics.CoreTempsCelsius;
+        if (fromPm is { Count: > 0 })
+        {
+            var hasNonZero = false;
+            foreach (var t in fromPm)
+            {
+                if (t > 0f) { hasNonZero = true; break; }
+            }
+            if (hasNonZero) return metrics;
+        }
+
+        var fromK10 = ReadK10TempCoreTemps();
+        if (fromK10.Count == 0) return metrics;
+
+        return new SmuMetrics
+        {
+            CpuPackagePowerWatts = metrics.CpuPackagePowerWatts,
+            CpuPptWatts = metrics.CpuPptWatts,
+            CpuPackageCurrentAmps = metrics.CpuPackageCurrentAmps,
+            Vcore = metrics.Vcore,
+            CpuTempCelsius = metrics.CpuTempCelsius,
+            CoreTempsCelsius = fromK10,
+            TctlCelsius = metrics.TctlCelsius,
+            Tccd1Celsius = metrics.Tccd1Celsius,
+            Tccd2Celsius = metrics.Tccd2Celsius,
+            CoreClockMHz = metrics.CoreClockMHz,
+            CoreClocksGhz = metrics.CoreClocksGhz,
+            MemoryClockMHz = metrics.MemoryClockMHz,
+            FclkMHz = metrics.FclkMHz,
+            UclkMHz = metrics.UclkMHz,
+            MclkMHz = metrics.MclkMHz,
+            Vsoc = metrics.Vsoc,
+            Vddp = metrics.Vddp,
+            VddgCcd = metrics.VddgCcd,
+            VddgIod = metrics.VddgIod,
+            VddMisc = metrics.VddMisc,
+            CpuVddio = metrics.CpuVddio,
+            MemVdd = metrics.MemVdd,
+            MemVddq = metrics.MemVddq,
+            MemVpp = metrics.MemVpp
+        };
+    }
+
+    /// <summary>Read Tctl (temp1), Tccd1 (temp3), Tccd2 (temp4) from k10temp only. Null for any channel not exposed.</summary>
+    private static (float? Tctl, float? Tccd1, float? Tccd2) ReadK10TempTctlTccd()
+    {
+        const string hwmonRoot = "/sys/class/hwmon";
+        if (!Directory.Exists(hwmonRoot)) return (null, null, null);
+
+        string? basePath = null;
+        foreach (var dir in Directory.GetDirectories(hwmonRoot))
+        {
+            var namePath = Path.Combine(dir, "name");
+            if (!File.Exists(namePath)) continue;
+            var name = File.ReadAllText(namePath).Trim();
+            if (name.Equals("k10temp", StringComparison.OrdinalIgnoreCase))
+            {
+                basePath = dir;
+                break;
+            }
+        }
+        if (string.IsNullOrEmpty(basePath)) return (null, null, null);
+
+        float? tctl = TryReadTempInput(basePath, 1, out var v1) ? v1 : null;
+        float? tccd1 = TryReadTempInput(basePath, 3, out var v3) ? v3 : null;
+        float? tccd2 = TryReadTempInput(basePath, 4, out var v4) ? v4 : null;
+        return (tctl, tccd1, tccd2);
+    }
+
+    /// <summary>
+    /// Read Tdie, Tctl, Tccd1 from zenpower hwmon (temp*_label / temp*_input) when k10temp is not present.
+    /// Returns nulls when zenpower is not loaded or labels are missing.
+    /// </summary>
+    private static (float? Tdie, float? Tctl, float? Tccd1) ReadZenpowerTdieTctlTccd()
+    {
+        const string hwmonRoot = "/sys/class/hwmon";
+        if (!Directory.Exists(hwmonRoot)) return (null, null, null);
+
+        string? basePath = null;
+        foreach (var dir in Directory.GetDirectories(hwmonRoot))
+        {
+            var namePath = Path.Combine(dir, "name");
+            if (!File.Exists(namePath)) continue;
+            var name = File.ReadAllText(namePath).Trim();
+            if (name.Contains("zenpower", StringComparison.OrdinalIgnoreCase))
+            {
+                basePath = dir;
+                break;
+            }
+        }
+        if (string.IsNullOrEmpty(basePath)) return (null, null, null);
+
+        float? tdie = null, tctl = null, tccd1 = null;
+
+        foreach (var labelPath in Directory.GetFiles(basePath, "temp*_label"))
+        {
+            var fileName = Path.GetFileName(labelPath);
+            // tempN_label -> extract N
+            var span = fileName.AsSpan(4, fileName.Length - "temp".Length - "_label".Length);
+            if (!int.TryParse(span, out var idx)) continue;
+
+            var label = File.ReadAllText(labelPath).Trim();
+            var inputPath = Path.Combine(basePath, $"temp{idx}_input");
+            if (!File.Exists(inputPath)) continue;
+            if (!int.TryParse(File.ReadAllText(inputPath).Trim(), out var raw)) continue;
+            float celsius = raw / 1000f;
+            if (celsius < 0f || celsius > 150f) continue;
+
+            if (label.Contains("Tdie", StringComparison.OrdinalIgnoreCase))
+                tdie = celsius;
+            else if (label.Contains("Tctl", StringComparison.OrdinalIgnoreCase))
+                tctl = celsius;
+            else if (label.Contains("Tccd1", StringComparison.OrdinalIgnoreCase))
+                tccd1 = celsius;
+        }
+
+        return (tdie, tctl, tccd1);
+    }
+
+    private static bool TryReadTempInput(string hwmonDir, int index, out float celsius)
+    {
+        celsius = 0;
+        var path = Path.Combine(hwmonDir, $"temp{index}_input");
+        if (!File.Exists(path)) return false;
+        if (!int.TryParse(File.ReadAllText(path).Trim(), out var raw)) return false;
+        celsius = raw / 1000f;
+        return celsius >= 0f && celsius <= 150f;
+    }
+
+    /// <summary>
+    /// Overlay Tdie, Tctl, Tccd1, Tccd2 from k10temp or zenpower onto metrics.
+    /// Prefers k10temp when available; falls back to zenpower when only zenpower is loaded.
+    /// </summary>
+    private static SmuMetrics ApplyK10TempTctlTccdOverlay(SmuMetrics metrics)
+    {
+        var (tctl, tccd1, tccd2) = ReadK10TempTctlTccd();
+        float? tdie = metrics.TdieCelsius;
+
+        // If k10temp didn't provide anything, fall back to zenpower temp labels.
+        if (!tctl.HasValue && !tccd1.HasValue && !tccd2.HasValue)
+        {
+            var (zTdie, zTctl, zTccd1) = ReadZenpowerTdieTctlTccd();
+            if (zTdie.HasValue) tdie = zTdie;
+            if (zTctl.HasValue) tctl = zTctl;
+            if (zTccd1.HasValue) tccd1 = zTccd1;
+        }
+
+        // If we still don't have an explicit Tdie but we do have Tctl or a plausible CPU temp,
+        // use those as a best-effort fallback so the UI doesn't show a missing Die temp.
+        if (!tdie.HasValue && tctl.HasValue)
+            tdie = tctl;
+        if (!tdie.HasValue && metrics.CpuTempCelsius > 0)
+            tdie = metrics.CpuTempCelsius;
+
+        if (!tdie.HasValue && !tctl.HasValue && !tccd1.HasValue && !tccd2.HasValue)
+            return metrics;
+
+        return new SmuMetrics
+        {
+            CpuPackagePowerWatts = metrics.CpuPackagePowerWatts,
+            CpuPptWatts = metrics.CpuPptWatts,
+            CpuPackageCurrentAmps = metrics.CpuPackageCurrentAmps,
+            Vcore = metrics.Vcore,
+            CpuTempCelsius = metrics.CpuTempCelsius,
+            CoreTempsCelsius = metrics.CoreTempsCelsius,
+            TdieCelsius = tdie ?? metrics.TdieCelsius,
+            TctlCelsius = tctl ?? metrics.TctlCelsius,
+            Tccd1Celsius = tccd1 ?? metrics.Tccd1Celsius,
+            Tccd2Celsius = tccd2 ?? metrics.Tccd2Celsius,
+            CoreClockMHz = metrics.CoreClockMHz,
+            CoreClocksGhz = metrics.CoreClocksGhz,
+            MemoryClockMHz = metrics.MemoryClockMHz,
+            FclkMHz = metrics.FclkMHz,
+            UclkMHz = metrics.UclkMHz,
+            MclkMHz = metrics.MclkMHz,
+            Vsoc = metrics.Vsoc,
+            Vddp = metrics.Vddp,
+            VddgCcd = metrics.VddgCcd,
+            VddgIod = metrics.VddgIod,
+            VddMisc = metrics.VddMisc,
+            CpuVddio = metrics.CpuVddio,
+            MemVdd = metrics.MemVdd,
+            MemVddq = metrics.MemVddq,
+            MemVpp = metrics.MemVpp
+        };
+    }
+
+    /// <summary>
+    /// Overlay SPD (DIMM) temperatures from spd5118 hwmon devices (temp1_input) onto metrics.
+    /// Each spd5118 instance corresponds to one DIMM temperature sensor.
+    /// </summary>
+    private static SmuMetrics ApplySpdTempsOverlay(SmuMetrics metrics)
+    {
+        var temps = ReadSpdTempsCelsius();
+        if (temps.Count == 0)
+            return metrics;
+
+        return new SmuMetrics
+        {
+            CpuPackagePowerWatts = metrics.CpuPackagePowerWatts,
+            CpuPptWatts = metrics.CpuPptWatts,
+            CpuPackageCurrentAmps = metrics.CpuPackageCurrentAmps,
+            Vcore = metrics.Vcore,
+            CpuTempCelsius = metrics.CpuTempCelsius,
+            CoreTempsCelsius = metrics.CoreTempsCelsius,
+            CoreUsagePercent = metrics.CoreUsagePercent,
+            CoreFreqMHz = metrics.CoreFreqMHz,
+            TdieCelsius = metrics.TdieCelsius,
+            TctlCelsius = metrics.TctlCelsius,
+            Tccd1Celsius = metrics.Tccd1Celsius,
+            Tccd2Celsius = metrics.Tccd2Celsius,
+            CoreClockMHz = metrics.CoreClockMHz,
+            CoreClocksGhz = metrics.CoreClocksGhz,
+            MemoryClockMHz = metrics.MemoryClockMHz,
+            FclkMHz = metrics.FclkMHz,
+            UclkMHz = metrics.UclkMHz,
+            MclkMHz = metrics.MclkMHz,
+            Vsoc = metrics.Vsoc,
+            Vddp = metrics.Vddp,
+            VddgCcd = metrics.VddgCcd,
+            VddgIod = metrics.VddgIod,
+            VddMisc = metrics.VddMisc,
+            CpuVddio = metrics.CpuVddio,
+            MemVdd = metrics.MemVdd,
+            MemVddq = metrics.MemVddq,
+            MemVpp = metrics.MemVpp,
+            SpdTempsCelsius = temps
+        };
+    }
+
+    /// <summary>
+    /// Read SPD5118 DIMM temperatures in a robust way:
+    /// 1) Known AMD desktop roots under /sys/devices (paths you provided)
+    /// 2) Fallback: /sys/class/hwmon entries whose name contains "spd5118"
+    /// 3) Fallback: parse "sensors" output for spd5118 sections and temp1 values.
+    /// </summary>
+    private static IReadOnlyList<float> ReadSpdTempsCelsius()
+    {
+        // 1) Board-specific roots under /sys/devices (fast, no recursion)
+        var fromDevices = ReadSpdTempsFromDevices();
+        if (fromDevices.Count > 0) return fromDevices;
+
+        // 2) Try /sys/class/hwmon for hwmon devices named spd5118-*
+        var fromHwmon = ReadSpdTempsFromHwmon();
+        if (fromHwmon.Count > 0) return fromHwmon;
+
+        // 3) Last resort: parse "sensors" output
+        return ReadSpdTempsFromSensors();
+    }
+
+    /// <summary>Read SPD temps from the specific /sys/devices i2c-7/7-005{3,1}/hwmon/... roots.</summary>
+    private static IReadOnlyList<float> ReadSpdTempsFromDevices()
+    {
+        var list = new List<float>();
+        try
+        {
+            string[] deviceRoots =
+            {
+                "/sys/devices/pci0000:00/0000:00:14.0/i2c-7/7-0053",
+                "/sys/devices/pci0000:00/0000:00:14.0/i2c-7/7-0051"
+            };
+
+            foreach (var root in deviceRoots)
+            {
+                if (!Directory.Exists(root)) continue;
+                var hwmonRoot = Path.Combine(root, "hwmon");
+                if (!Directory.Exists(hwmonRoot)) continue;
+
+                foreach (var hwmonDir in Directory.GetDirectories(hwmonRoot))
+                {
+                    var tempPath = Path.Combine(hwmonDir, "temp1_input");
+                    if (!File.Exists(tempPath)) continue;
+                    var s = File.ReadAllText(tempPath).Trim();
+                    if (!int.TryParse(s, out var rawInt)) continue;
+                    float celsius = rawInt / 1000f;
+                    if (celsius < 0f || celsius > 150f) continue;
+                    list.Add(celsius);
+                }
+            }
+        }
+        catch
+        {
+            // ignore
+        }
+
+        return list.Count == 0 ? Array.Empty<float>() : list;
+    }
+
+    /// <summary>Read SPD temps from /sys/class/hwmon entries whose "name" contains spd5118.</summary>
+    private static IReadOnlyList<float> ReadSpdTempsFromHwmon()
+    {
+        const string hwmonRoot = "/sys/class/hwmon";
+        if (!Directory.Exists(hwmonRoot)) return Array.Empty<float>();
+
+        var list = new List<float>();
+        try
+        {
+            foreach (var dir in Directory.GetDirectories(hwmonRoot))
+            {
+                var namePath = Path.Combine(dir, "name");
+                if (!File.Exists(namePath)) continue;
+                var name = File.ReadAllText(namePath).Trim().ToLowerInvariant();
+                if (!name.Contains("spd5118")) continue;
+
+                var tempPath = Path.Combine(dir, "temp1_input");
+                if (!File.Exists(tempPath)) continue;
+                var s = File.ReadAllText(tempPath).Trim();
+                if (!int.TryParse(s, out var rawInt)) continue;
+                float celsius = rawInt / 1000f;
+                if (celsius < 0f || celsius > 150f) continue;
+                list.Add(celsius);
+            }
+        }
+        catch
+        {
+            // ignore
+        }
+
+        return list.Count == 0 ? Array.Empty<float>() : list;
+    }
+
+    /// <summary>Fallback: run "sensors" and parse spd5118 sections for temp1 values.</summary>
+    private static IReadOnlyList<float> ReadSpdTempsFromSensors()
+    {
+        var list = new List<float>();
+        try
+        {
+            using var proc = new Process
+            {
+                StartInfo = new ProcessStartInfo
+                {
+                    FileName = "sensors",
+                    Arguments = "",
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                }
+            };
+            proc.Start();
+            var stdout = proc.StandardOutput.ReadToEnd();
+            proc.WaitForExit(2000);
+            if (proc.ExitCode != 0 || string.IsNullOrWhiteSpace(stdout))
+                return Array.Empty<float>();
+
+            string? currentChip = null;
+            bool inSpd = false;
+            foreach (var rawLine in stdout.Split('\n'))
+            {
+                var line = rawLine.TrimEnd();
+                if (string.IsNullOrWhiteSpace(line))
+                {
+                    inSpd = false;
+                    continue;
+                }
+
+                // Chip header: no leading whitespace and no ':' (e.g. "spd5118-i2c-7-53")
+                if (!char.IsWhiteSpace(rawLine, 0) && !line.Contains(':'))
+                {
+                    currentChip = line.Trim();
+                    inSpd = currentChip.ToLowerInvariant().Contains("spd5118");
+                    continue;
+                }
+
+                if (!inSpd) continue;
+                var trimmed = line.TrimStart();
+                if (!trimmed.StartsWith("temp", StringComparison.OrdinalIgnoreCase)) continue;
+                var colon = trimmed.IndexOf(':');
+                if (colon <= 0) continue;
+                var rest = trimmed[(colon + 1)..];
+
+                // Extract first numeric token (e.g. +33.0°C)
+                foreach (var part in rest.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+                {
+                    var p = part.TrimStart('+');
+                    if (float.TryParse(p.TrimEnd('C', 'c', '°'), NumberStyles.Float, CultureInfo.InvariantCulture, out var v))
+                    {
+                        list.Add(v);
+                        break;
+                    }
+                }
+            }
+        }
+        catch
+        {
+            return Array.Empty<float>();
+        }
+
+        return list.Count == 0 ? Array.Empty<float>() : list;
+    }
+
+    /// <summary>
+    /// Compute per-physical-core usage (0–100 %) from /proc/stat and per-core frequency (MHz) from cpufreq,
+    /// attach both to metrics. Logical CPUs are grouped as SMT pairs (cpu0+cpu1 = core0, cpu2+cpu3 = core1, ...).
+    /// </summary>
+    private SmuMetrics ApplyProcStatCoreUsage(SmuMetrics metrics)
+    {
+        var coreUsage = ReadPerCoreUsagePercent();
+        var coreFreq = ReadPerCoreFreqMhz();
+        if (coreUsage.Count == 0 && coreFreq.Count == 0)
+            return metrics;
+
+        return new SmuMetrics
+        {
+            CpuPackagePowerWatts = metrics.CpuPackagePowerWatts,
+            CpuPptWatts = metrics.CpuPptWatts,
+            CpuPackageCurrentAmps = metrics.CpuPackageCurrentAmps,
+            Vcore = metrics.Vcore,
+            CpuTempCelsius = metrics.CpuTempCelsius,
+            CoreTempsCelsius = metrics.CoreTempsCelsius,
+            CoreUsagePercent = coreUsage,
+            CoreFreqMHz = coreFreq,
+            TctlCelsius = metrics.TctlCelsius,
+            Tccd1Celsius = metrics.Tccd1Celsius,
+            Tccd2Celsius = metrics.Tccd2Celsius,
+            CoreClockMHz = metrics.CoreClockMHz,
+            CoreClocksGhz = metrics.CoreClocksGhz,
+            MemoryClockMHz = metrics.MemoryClockMHz,
+            FclkMHz = metrics.FclkMHz,
+            UclkMHz = metrics.UclkMHz,
+            MclkMHz = metrics.MclkMHz,
+            Vsoc = metrics.Vsoc,
+            Vddp = metrics.Vddp,
+            VddgCcd = metrics.VddgCcd,
+            VddgIod = metrics.VddgIod,
+            VddMisc = metrics.VddMisc,
+            CpuVddio = metrics.CpuVddio,
+            MemVdd = metrics.MemVdd,
+            MemVddq = metrics.MemVddq,
+            MemVpp = metrics.MemVpp,
+            SpdTempsCelsius = metrics.SpdTempsCelsius
+        };
+    }
+
+    /// <summary>
+    /// Read /proc/stat and compute per-physical-core usage percentage based on deltas since last call.
+    /// Uses standard Linux accounting: usage = 1 - deltaIdle / deltaTotal, scaled to 0–100.
+    /// </summary>
+    private IReadOnlyList<float> ReadPerCoreUsagePercent()
+    {
+        const string statPath = "/proc/stat";
+        if (!File.Exists(statPath))
+            return Array.Empty<float>();
+
+        var lines = File.ReadAllLines(statPath);
+        if (lines.Length == 0)
+            return Array.Empty<float>();
+
+        // First collect per-logical-CPU usage.
+        var logicalUsage = new Dictionary<int, float>();
+
+        foreach (var line in lines)
+        {
+            // Skip summary "cpu " line; only process "cpuN" lines.
+            if (!line.StartsWith("cpu", StringComparison.Ordinal))
+                continue;
+            if (line.Length < 4 || !char.IsDigit(line[3]))
+                continue;
+
+            var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length < 5)
+                continue;
+
+            var idStr = parts[0].Substring(3);
+            if (!int.TryParse(idStr, out var cpuIndex))
+                continue;
+
+            // Standard /proc/stat columns: user nice system idle iowait irq softirq steal guest guest_nice
+            // We care about total and idle (idle + iowait).
+            ulong ParseField(int idx)
+            {
+                if (idx >= parts.Length) return 0;
+                return ulong.TryParse(parts[idx], out var v) ? v : 0;
+            }
+
+            ulong user = ParseField(1);
+            ulong nice = ParseField(2);
+            ulong system = ParseField(3);
+            ulong idle = ParseField(4);
+            ulong iowait = ParseField(5);
+            ulong irq = ParseField(6);
+            ulong softirq = ParseField(7);
+            ulong steal = ParseField(8);
+            ulong guest = ParseField(9);
+            ulong guestNice = ParseField(10);
+
+            ulong idleAll = idle + iowait;
+            ulong total = user + nice + system + idle + iowait + irq + softirq + steal + guest + guestNice;
+
+            if (total == 0)
+                continue;
+
+            if (!_prevCpuTimes.TryGetValue(cpuIndex, out var prev))
+            {
+                // First sample – store and report 0 % usage for this CPU.
+                _prevCpuTimes[cpuIndex] = (idleAll, total);
+                logicalUsage[cpuIndex] = 0f;
+                continue;
+            }
+
+            ulong deltaIdle = idleAll - prev.Idle;
+            ulong deltaTotal = total - prev.Total;
+            _prevCpuTimes[cpuIndex] = (idleAll, total);
+
+            if (deltaTotal == 0)
+            {
+                logicalUsage[cpuIndex] = 0f;
+                continue;
+            }
+
+            float usage = 1.0f - (float)deltaIdle / deltaTotal;
+            if (usage < 0f) usage = 0f;
+            if (usage > 1f) usage = 1f;
+            logicalUsage[cpuIndex] = usage * 100f;
+        }
+
+        if (logicalUsage.Count == 0)
+            return Array.Empty<float>();
+
+        // Group logical CPUs into physical cores by assuming 2 threads per core:
+        // coreIndex = cpuIndex / 2. Average usage across threads.
+        var coreSums = new Dictionary<int, (float Sum, int Count)>();
+        foreach (var kvp in logicalUsage)
+        {
+            int coreIndex = kvp.Key / 2;
+            if (!coreSums.TryGetValue(coreIndex, out var agg))
+                agg = (0f, 0);
+            agg.Sum += kvp.Value;
+            agg.Count += 1;
+            coreSums[coreIndex] = agg;
+        }
+
+        if (coreSums.Count == 0)
+            return Array.Empty<float>();
+
+        int maxCore = 0;
+        foreach (var coreIndex in coreSums.Keys)
+            if (coreIndex > maxCore) maxCore = coreIndex;
+
+        var result = new float[maxCore + 1];
+        for (int i = 0; i <= maxCore; i++)
+        {
+            if (coreSums.TryGetValue(i, out var agg) && agg.Count > 0)
+                result[i] = agg.Sum / agg.Count;
+            else
+                result[i] = 0f;
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Read per-logical-CPU frequencies from cpufreq (scaling_cur_freq, kHz) and aggregate into per-physical-core MHz.
+    /// Groups logical CPUs as SMT pairs (cpu0+cpu1 = core0, etc.), averaging their MHz.
+    /// </summary>
+    private IReadOnlyList<float> ReadPerCoreFreqMhz()
+    {
+        var logicalFreq = new Dictionary<int, float>();
+
+        try
+        {
+            const string cpuRoot = "/sys/devices/system/cpu";
+            if (!Directory.Exists(cpuRoot))
+                return Array.Empty<float>();
+
+            for (int cpu = 0; cpu < 256; cpu++)
+            {
+                var path = Path.Combine(cpuRoot, $"cpu{cpu}", "cpufreq", "scaling_cur_freq");
+                if (!File.Exists(path))
+                    continue;
+                var s = File.ReadAllText(path).Trim();
+                if (!int.TryParse(s, out var khz) || khz <= 0)
+                    continue;
+                float mhz = khz / 1000f;
+                logicalFreq[cpu] = mhz;
+            }
+        }
+        catch
+        {
+            // ignore cpufreq read errors, just return what we have
+        }
+
+        if (logicalFreq.Count == 0)
+            return Array.Empty<float>();
+
+        var coreSums = new Dictionary<int, (float Sum, int Count)>();
+        foreach (var kvp in logicalFreq)
+        {
+            int coreIndex = kvp.Key / 2;
+            if (!coreSums.TryGetValue(coreIndex, out var agg))
+                agg = (0f, 0);
+            agg.Sum += kvp.Value;
+            agg.Count += 1;
+            coreSums[coreIndex] = agg;
+        }
+
+        if (coreSums.Count == 0)
+            return Array.Empty<float>();
+
+        int maxCore = 0;
+        foreach (var coreIndex in coreSums.Keys)
+            if (coreIndex > maxCore) maxCore = coreIndex;
+
+        var result = new float[maxCore + 1];
+        for (int i = 0; i <= maxCore; i++)
+        {
+            if (coreSums.TryGetValue(i, out var agg) && agg.Count > 0)
+                result[i] = agg.Sum / agg.Count;
+            else
+                result[i] = 0f;
+        }
+
+        return result;
+    }
+
+<<<<<<< Updated upstream
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+=======
+>>>>>>> Stashed changes
+=======
+>>>>>>> Stashed changes
     private static DramTimingsModel ReadGraniteRidgeDdr5Timings()
     {
         var model = new DramTimingsModel();

@@ -8,7 +8,41 @@ cd "$SCRIPT_DIR"
 
 OUT_DIR="$SCRIPT_DIR/publish"
 APPDIR="$SCRIPT_DIR/AppDir"
+APPIMAGE_DIR="$SCRIPT_DIR/appimage"
 RID="${RID:-linux-x64}"
+
+echo "==> Ensuring appimage assets (AppRun, desktop, icon) exist..."
+mkdir -p "$APPIMAGE_DIR"
+
+# Generate AppRun launcher if missing
+if [ ! -f "$APPIMAGE_DIR/AppRun" ]; then
+  cat > "$APPIMAGE_DIR/AppRun" << 'EOF'
+#!/bin/sh
+HERE="$(dirname "$(readlink -f "$0")")"
+exec "$HERE/usr/bin/TuxTimings.LinuxUI" "$@"
+EOF
+  chmod +x "$APPIMAGE_DIR/AppRun"
+fi
+
+# Generate minimal desktop file if missing
+if [ ! -f "$APPIMAGE_DIR/tuxtimings.desktop" ]; then
+  cat > "$APPIMAGE_DIR/tuxtimings.desktop" << 'EOF'
+[Desktop Entry]
+Name=TuxTimings
+Comment=AMD Ryzen DRAM timings viewer
+Exec=TuxTimings.LinuxUI
+Icon=tuxtimings
+Terminal=false
+Type=Application
+Categories=Utility;
+EOF
+fi
+
+# Icon: expect tuxtimings.png in the Linux folder.
+# Copy it into appimage/ so the later step can place it into AppDir.
+if [ -f "$SCRIPT_DIR/tuxtimings.png" ] && [ ! -f "$APPIMAGE_DIR/tuxtimings.png" ]; then
+  cp "$SCRIPT_DIR/tuxtimings.png" "$APPIMAGE_DIR/tuxtimings.png"
+fi
 
 echo "==> Publishing self-contained app (runtime: $RID)..."
 dotnet publish TuxTimings.LinuxUI/TuxTimings.LinuxUI.csproj \
@@ -28,8 +62,12 @@ if [ ! -x "$APPDIR/usr/bin/TuxTimings.LinuxUI" ]; then
   ls -la "$APPDIR/usr/bin/" | head -20
   exit 1
 fi
-cp "$SCRIPT_DIR/appimage/AppRun" "$APPDIR/"
-cp "$SCRIPT_DIR/appimage/tuxtimings.desktop" "$APPDIR/"
+cp "$APPIMAGE_DIR/AppRun" "$APPDIR/"
+cp "$APPIMAGE_DIR/tuxtimings.desktop" "$APPDIR/"
+# AppImage expects an icon file matching the desktop's Icon= entry ("tuxtimings").
+if [ -f "$APPIMAGE_DIR/tuxtimings.png" ]; then
+  cp "$APPIMAGE_DIR/tuxtimings.png" "$APPDIR/tuxtimings.png"
+fi
 chmod +x "$APPDIR/AppRun"
 
 echo "==> Creating AppImage (requires appimagetool in PATH or in current dir)..."
