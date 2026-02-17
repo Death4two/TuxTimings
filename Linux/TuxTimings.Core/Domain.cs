@@ -81,11 +81,17 @@ public sealed class SmuMetrics
     public float CpuPptWatts { get; init; }
     /// <summary>Package current in amps (from zenpower or PM table when available).</summary>
     public float CpuPackageCurrentAmps { get; init; }
-    /// <summary>Core voltage (V) from PM table index 308 (Granite Ridge). 0 if unavailable.</summary>
+    /// <summary>Core voltage (V) from PM table index 271 (Granite Ridge). 0 if unavailable.</summary>
     public float Vcore { get; init; }
     public float CpuTempCelsius { get; init; }
-    /// <summary>Per-core temperatures °C from PM table indices 317–324 (up to 8 cores).</summary>
+    /// <summary>Per-core/CCD temperatures °C. Primary: PM table indices 317–324 (up to 8). Fallback: k10temp Tccd1–Tccd8 (temp3–temp10).</summary>
     public IReadOnlyList<float> CoreTempsCelsius { get; init; } = Array.Empty<float>();
+    /// <summary>Tctl from k10temp temp1_input (°C). Null if k10temp does not expose it.</summary>
+    public float? TctlCelsius { get; init; }
+    /// <summary>Tccd1 from k10temp temp3_input (°C). Null if k10temp does not expose it.</summary>
+    public float? Tccd1Celsius { get; init; }
+    /// <summary>Tccd2 from k10temp temp4_input (°C). Null if k10temp does not expose it.</summary>
+    public float? Tccd2Celsius { get; init; }
     public float CoreClockMHz { get; init; }
     /// <summary>Per-core clocks in GHz from PM table indices 325–340 (up to 16 cores).</summary>
     public IReadOnlyList<float> CoreClocksGhz { get; init; } = Array.Empty<float>();
@@ -108,7 +114,8 @@ public sealed class DramTimingsModel
 {
     // Primary timings
     public uint Tcl { get; init; }
-    public uint Trcd { get; init; }
+    public uint TrcdRd { get; init; }
+    public uint TrcdWr { get; init; }
     public uint Trp { get; init; }
     public uint Tras { get; init; }
     public uint Trc { get; init; }
@@ -167,6 +174,9 @@ public sealed class DramTimingsModel
     public float FrequencyHintMHz { get; init; }
 }
 
+/// <summary>Single fan reading from hwmon (e.g. NCT6799); Label is "Fan1".."Fan6" or "Pump" for fan7.</summary>
+public sealed record FanReading(string Label, int Rpm);
+
 /// <summary>Board and BIOS info from dmidecode -s baseboard-product-name / bios-version / bios-release-date.</summary>
 public sealed class BoardInfoModel
 {
@@ -202,6 +212,8 @@ public sealed class SystemSummary
     public IReadOnlyList<MemoryModule> Modules { get; init; } = Array.Empty<MemoryModule>();
     public SmuMetrics Metrics { get; init; } = new();
     public DramTimingsModel DramTimings { get; init; } = new();
+    /// <summary>Fans from hwmon (e.g. NCT6799); fan7 shown as Pump. No 0 RPM entries.</summary>
+    public IReadOnlyList<FanReading> Fans { get; init; } = Array.Empty<FanReading>();
 }
 
 public interface IHardwareBackend

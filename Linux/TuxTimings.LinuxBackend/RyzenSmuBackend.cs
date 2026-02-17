@@ -88,7 +88,7 @@ public sealed class RyzenSmuBackend : IHardwareBackend
                 CpuPackagePowerWatts = values.GetValueOrDefault("POWER"),
                 CpuPptWatts = values.GetValueOrDefault("PPT"),
                 CpuPackageCurrentAmps = values.GetValueOrDefault("CURRENT"),
-                CpuTempCelsius = values.GetValueOrDefault("TEMP") is var t && t > 0 ? t : values.GetValueOrDefault("TDIE"),
+                CpuTempCelsius = values.GetValueOrDefault("TEMP"),
                 CoreTempsCelsius = coreTemps,
                 CoreClockMHz = values.GetValueOrDefault("CORE_MHZ")
             };
@@ -236,6 +236,8 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
             BiosReleaseDate = biosReleaseDate
         };
 
+        var fans = ReadHwmonFans();
+
         return new SystemSummary
         {
             Cpu = cpu,
@@ -243,8 +245,41 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
             BoardInfo = boardInfo,
             Modules = Array.Empty<MemoryModule>(),
             Metrics = metrics,
-            DramTimings = dramTimings
+            DramTimings = dramTimings,
+            Fans = fans
         };
+    }
+
+    /// <summary>Read fan1–fan7 from hwmon device named nct6799; fan7 = Pump; exclude 0 RPM.</summary>
+    private static IReadOnlyList<FanReading> ReadHwmonFans()
+    {
+        const string hwmonRoot = "/sys/class/hwmon";
+        if (!Directory.Exists(hwmonRoot)) return Array.Empty<FanReading>();
+
+        string? basePath = null;
+        foreach (var dir in Directory.GetDirectories(hwmonRoot))
+        {
+            var namePath = Path.Combine(dir, "name");
+            if (!File.Exists(namePath)) continue;
+            var name = File.ReadAllText(namePath).Trim();
+            if (name.Contains("nct6799", StringComparison.OrdinalIgnoreCase))
+            {
+                basePath = dir;
+                break;
+            }
+        }
+        if (string.IsNullOrEmpty(basePath)) return Array.Empty<FanReading>();
+
+        var list = new List<FanReading>();
+        for (int i = 1; i <= 7; i++)
+        {
+            var path = Path.Combine(basePath, $"fan{i}_input");
+            if (!File.Exists(path)) continue;
+            if (!int.TryParse(File.ReadAllText(path).Trim(), out var rpm) || rpm <= 0) continue;
+            var label = i == 7 ? "Pump" : $"Fan{i}";
+            list.Add(new FanReading(label, rpm));
+        }
+        return list;
     }
 
     private static string ReadString(string fileName)
@@ -479,6 +514,10 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
 
             // Overlay with zenpower3 hwmon values if available.
             var metrics = ApplyZenpowerOverrides(baseMetrics);
+            // If PM table did not provide per-core temps, use k10temp CCD temps (temp3–temp10 = Tccd1–Tccd8).
+            metrics = ApplyK10TempCoreTempFallback(metrics);
+            // Tctl, Tccd1, Tccd2 from k10temp (temp1, temp3, temp4); Tccd2 only when exposed.
+            metrics = ApplyK10TempTctlTccdOverlay(metrics);
 
             // Dump PM table and parsed values on first successful read (at startup).
             if (!_hasDumpedOnce)
@@ -501,7 +540,7 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
             {
                 var pyMetrics = TryReadPmTableViaPython();
                 if (pyMetrics is { } m && (m.FclkMHz > 0 || m.Vsoc > 0))
-                    return ApplyZenpowerOverrides(m);
+                    return ApplyK10TempTctlTccdOverlay(ApplyK10TempCoreTempFallback(ApplyZenpowerOverrides(m)));
             }
             return new SmuMetrics();
         }
@@ -915,6 +954,9 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
                 Vcore = metrics.Vcore,
                 CpuTempCelsius = metrics.CpuTempCelsius,
                 CoreTempsCelsius = metrics.CoreTempsCelsius,
+                TctlCelsius = metrics.TctlCelsius,
+                Tccd1Celsius = metrics.Tccd1Celsius,
+                Tccd2Celsius = metrics.Tccd2Celsius,
                 CoreClockMHz = metrics.CoreClockMHz,
                 CoreClocksGhz = metrics.CoreClocksGhz,
                 MemoryClockMHz = metrics.MemoryClockMHz,
@@ -944,6 +986,177 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
         var path = Path.Combine(hwmonDir, file);
         if (!File.Exists(path)) return false;
         return float.TryParse(File.ReadAllText(path).Trim(), out value);
+    }
+
+    /// <summary>
+    /// Read per-CCD/per-core temperatures from hwmon. Tries (1) k10temp: temp3–temp10 = Tccd1–Tccd8;
+    /// (2) zenpower: temp*_input when k10temp not present. temp*_input is millidegrees; we return °C.
+    /// Used as fallback when PM table core temps are missing.
+    /// </summary>
+    private static IReadOnlyList<float> ReadK10TempCoreTemps()
+    {
+        const string hwmonRoot = "/sys/class/hwmon";
+        if (!Directory.Exists(hwmonRoot)) return Array.Empty<float>();
+
+        string? basePath = null;
+        bool isK10 = false;
+        foreach (var dir in Directory.GetDirectories(hwmonRoot))
+        {
+            var namePath = Path.Combine(dir, "name");
+            if (!File.Exists(namePath)) continue;
+            var name = File.ReadAllText(namePath).Trim();
+            if (name.Equals("k10temp", StringComparison.OrdinalIgnoreCase))
+            {
+                basePath = dir;
+                isK10 = true;
+                break;
+            }
+            if (name.Contains("zenpower", StringComparison.OrdinalIgnoreCase) && basePath == null)
+                basePath = dir;
+        }
+        if (string.IsNullOrEmpty(basePath)) return Array.Empty<float>();
+
+        var list = new List<float>();
+        if (isK10)
+        {
+            // k10temp: temp3 = Tccd1 .. temp10 = Tccd8
+            for (int i = 3; i <= 10; i++)
+                TryAddTempInput(basePath, i, list);
+        }
+        else
+        {
+            // zenpower: scan temp1_input, temp2_input, ... and take plausible values
+            for (int i = 1; i <= 10; i++)
+                TryAddTempInput(basePath, i, list);
+        }
+        return list;
+    }
+
+    private static void TryAddTempInput(string hwmonDir, int index, List<float> list)
+    {
+        var path = Path.Combine(hwmonDir, $"temp{index}_input");
+        if (!File.Exists(path)) return;
+        if (!int.TryParse(File.ReadAllText(path).Trim(), out var raw)) return;
+        float celsius = raw / 1000f; // millidegrees -> °C
+        if (celsius >= 0f && celsius <= 150f)
+            list.Add(celsius);
+    }
+
+    /// <summary>If PM table core temps are empty or all zero, fill from k10temp CCD temps (alternative source).</summary>
+    private static SmuMetrics ApplyK10TempCoreTempFallback(SmuMetrics metrics)
+    {
+        var fromPm = metrics.CoreTempsCelsius;
+        if (fromPm is { Count: > 0 })
+        {
+            var hasNonZero = false;
+            foreach (var t in fromPm)
+            {
+                if (t > 0f) { hasNonZero = true; break; }
+            }
+            if (hasNonZero) return metrics;
+        }
+
+        var fromK10 = ReadK10TempCoreTemps();
+        if (fromK10.Count == 0) return metrics;
+
+        return new SmuMetrics
+        {
+            CpuPackagePowerWatts = metrics.CpuPackagePowerWatts,
+            CpuPptWatts = metrics.CpuPptWatts,
+            CpuPackageCurrentAmps = metrics.CpuPackageCurrentAmps,
+            Vcore = metrics.Vcore,
+            CpuTempCelsius = metrics.CpuTempCelsius,
+            CoreTempsCelsius = fromK10,
+            TctlCelsius = metrics.TctlCelsius,
+            Tccd1Celsius = metrics.Tccd1Celsius,
+            Tccd2Celsius = metrics.Tccd2Celsius,
+            CoreClockMHz = metrics.CoreClockMHz,
+            CoreClocksGhz = metrics.CoreClocksGhz,
+            MemoryClockMHz = metrics.MemoryClockMHz,
+            FclkMHz = metrics.FclkMHz,
+            UclkMHz = metrics.UclkMHz,
+            MclkMHz = metrics.MclkMHz,
+            Vsoc = metrics.Vsoc,
+            Vddp = metrics.Vddp,
+            VddgCcd = metrics.VddgCcd,
+            VddgIod = metrics.VddgIod,
+            VddMisc = metrics.VddMisc,
+            CpuVddio = metrics.CpuVddio,
+            MemVdd = metrics.MemVdd,
+            MemVddq = metrics.MemVddq,
+            MemVpp = metrics.MemVpp
+        };
+    }
+
+    /// <summary>Read Tctl (temp1), Tccd1 (temp3), Tccd2 (temp4) from k10temp only. Null for any channel not exposed.</summary>
+    private static (float? Tctl, float? Tccd1, float? Tccd2) ReadK10TempTctlTccd()
+    {
+        const string hwmonRoot = "/sys/class/hwmon";
+        if (!Directory.Exists(hwmonRoot)) return (null, null, null);
+
+        string? basePath = null;
+        foreach (var dir in Directory.GetDirectories(hwmonRoot))
+        {
+            var namePath = Path.Combine(dir, "name");
+            if (!File.Exists(namePath)) continue;
+            var name = File.ReadAllText(namePath).Trim();
+            if (name.Equals("k10temp", StringComparison.OrdinalIgnoreCase))
+            {
+                basePath = dir;
+                break;
+            }
+        }
+        if (string.IsNullOrEmpty(basePath)) return (null, null, null);
+
+        float? tctl = TryReadTempInput(basePath, 1, out var v1) ? v1 : null;
+        float? tccd1 = TryReadTempInput(basePath, 3, out var v3) ? v3 : null;
+        float? tccd2 = TryReadTempInput(basePath, 4, out var v4) ? v4 : null;
+        return (tctl, tccd1, tccd2);
+    }
+
+    private static bool TryReadTempInput(string hwmonDir, int index, out float celsius)
+    {
+        celsius = 0;
+        var path = Path.Combine(hwmonDir, $"temp{index}_input");
+        if (!File.Exists(path)) return false;
+        if (!int.TryParse(File.ReadAllText(path).Trim(), out var raw)) return false;
+        celsius = raw / 1000f;
+        return celsius >= 0f && celsius <= 150f;
+    }
+
+    /// <summary>Overlay Tctl, Tccd1, Tccd2 from k10temp onto metrics. Each only set when k10temp exposes that channel.</summary>
+    private static SmuMetrics ApplyK10TempTctlTccdOverlay(SmuMetrics metrics)
+    {
+        var (tctl, tccd1, tccd2) = ReadK10TempTctlTccd();
+        if (!tctl.HasValue && !tccd1.HasValue && !tccd2.HasValue) return metrics;
+
+        return new SmuMetrics
+        {
+            CpuPackagePowerWatts = metrics.CpuPackagePowerWatts,
+            CpuPptWatts = metrics.CpuPptWatts,
+            CpuPackageCurrentAmps = metrics.CpuPackageCurrentAmps,
+            Vcore = metrics.Vcore,
+            CpuTempCelsius = metrics.CpuTempCelsius,
+            CoreTempsCelsius = metrics.CoreTempsCelsius,
+            TctlCelsius = tctl ?? metrics.TctlCelsius,
+            Tccd1Celsius = tccd1 ?? metrics.Tccd1Celsius,
+            Tccd2Celsius = tccd2 ?? metrics.Tccd2Celsius,
+            CoreClockMHz = metrics.CoreClockMHz,
+            CoreClocksGhz = metrics.CoreClocksGhz,
+            MemoryClockMHz = metrics.MemoryClockMHz,
+            FclkMHz = metrics.FclkMHz,
+            UclkMHz = metrics.UclkMHz,
+            MclkMHz = metrics.MclkMHz,
+            Vsoc = metrics.Vsoc,
+            Vddp = metrics.Vddp,
+            VddgCcd = metrics.VddgCcd,
+            VddgIod = metrics.VddgIod,
+            VddMisc = metrics.VddMisc,
+            CpuVddio = metrics.CpuVddio,
+            MemVdd = metrics.MemVdd,
+            MemVddq = metrics.MemVddq,
+            MemVpp = metrics.MemVpp
+        };
     }
 
     private static DramTimingsModel ReadGraniteRidgeDdr5Timings()
@@ -984,7 +1197,9 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
             uint reg502A4 = ReadSmn(offset | 0x502A4);
 
             uint tcl = BitSlice(reg50204, 5, 0);
-            uint trcd = BitSlice(reg50204, 21, 16);
+            uint trcdRd = BitSlice(reg50204, 21, 16);
+            uint trcdWr = BitSlice(reg50204, 29, 24);
+            if (trcdWr == 0) trcdWr = trcdRd; // fallback when not split in register
             uint tras = BitSlice(reg50204, 14, 8);
             uint trp = BitSlice(reg50208, 21, 16);
             uint trc = BitSlice(reg50208, 7, 0);
@@ -1089,7 +1304,8 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
             model = new DramTimingsModel
             {
                 Tcl = tcl,
-                Trcd = trcd,
+                TrcdRd = trcdRd,
+                TrcdWr = trcdWr,
                 Trp = trp,
                 Tras = tras,
                 Trc = trc,
