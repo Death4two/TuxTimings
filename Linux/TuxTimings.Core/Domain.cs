@@ -77,8 +77,18 @@ public sealed class CpuInfoModel
 public sealed class SmuMetrics
 {
     public float CpuPackagePowerWatts { get; init; }
+    /// <summary>CPU PPT (Package Power Tracking) in watts from PM table indices 3, 26.</summary>
+    public float CpuPptWatts { get; init; }
+    /// <summary>Package current in amps (from zenpower or PM table when available).</summary>
+    public float CpuPackageCurrentAmps { get; init; }
+    /// <summary>Core voltage (V) from PM table index 308 (Granite Ridge). 0 if unavailable.</summary>
+    public float Vcore { get; init; }
     public float CpuTempCelsius { get; init; }
+    /// <summary>Per-core temperatures °C from PM table indices 317–324 (up to 8 cores).</summary>
+    public IReadOnlyList<float> CoreTempsCelsius { get; init; } = Array.Empty<float>();
     public float CoreClockMHz { get; init; }
+    /// <summary>Per-core clocks in GHz from PM table indices 325–340 (up to 16 cores).</summary>
+    public IReadOnlyList<float> CoreClocksGhz { get; init; } = Array.Empty<float>();
     public float MemoryClockMHz { get; init; }
     public float FclkMHz { get; init; }
     public float UclkMHz { get; init; }

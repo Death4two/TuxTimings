@@ -1,5 +1,6 @@
 using System;
 using System.ComponentModel;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Reflection;
 using Timer = System.Timers.Timer;
@@ -21,6 +22,18 @@ public sealed class MainViewModel : INotifyPropertyChanged
         {
             _summary = value;
             OnPropertyChanged();
+            OnPropertyChanged(nameof(CoreTempsDisplay));
+        }
+    }
+
+    /// <summary>Per-core temps for UI: "C0: 17  C1: 15  … °C".</summary>
+    public string CoreTempsDisplay
+    {
+        get
+        {
+            var list = Summary.Metrics.CoreTempsCelsius;
+            if (list == null || list.Count == 0) return "—";
+            return string.Join("  ", list.Select((t, i) => $"C{i}: {t:F0}")) + " °C";
         }
     }
 

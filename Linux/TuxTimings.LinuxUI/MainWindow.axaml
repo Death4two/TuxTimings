@@ -3,8 +3,8 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         x:Class="TuxTimings.LinuxUI.MainWindow"
-        Width="720" Height="580"
-        MinWidth="720" MaxWidth="720"
+        Width="900" Height="580"
+        MinWidth="900" MaxWidth="900"
         MinHeight="580" MaxHeight="580"
         CanResize="False"
         Title="TuxTimings"
@@ -26,8 +26,8 @@
       </StackPanel>
     </Grid>
 
-    <!-- Top row: Speed | Capacity | Clocks (3 columns) -->
-    <Grid Grid.Row="1" ColumnDefinitions="*,*,*" Margin="0,0,0,12">
+    <!-- Top row: Speed | Capacity | Clocks | Power & CPU (4 columns) -->
+    <Grid Grid.Row="1" ColumnDefinitions="*,*,*,*" Margin="0,0,0,12">
       <Border Grid.Column="0" Classes="section" Margin="0,0,4,0">
         <StackPanel Spacing="6">
           <TextBlock Text="Speed" Classes="label"/>
@@ -48,16 +48,31 @@
           <TextBlock Text="{Binding Summary.DramTimings.Cmd2T}"/>
         </StackPanel>
       </Border>
-      <Border Grid.Column="2" Classes="section" Margin="4,0,0,0">
+      <Border Grid.Column="2" Classes="section" Margin="2,0">
         <StackPanel Spacing="6">
           <TextBlock Text="Clocks" Classes="label"/>
-          <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto">
+          <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto">
             <TextBlock Grid.Row="0" Grid.Column="0" Text="MCLK:" Classes="label" Margin="0,0,8,4"/>
             <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding Summary.Metrics.MclkMHz, StringFormat=\{0:F2\}}" Classes="value-highlight"/>
             <TextBlock Grid.Row="1" Grid.Column="0" Text="FCLK:" Classes="label" Margin="0,0,8,4"/>
             <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding Summary.Metrics.FclkMHz, StringFormat=\{0:F2\}}" Classes="value-highlight"/>
             <TextBlock Grid.Row="2" Grid.Column="0" Text="UCLK:" Classes="label" Margin="0,0,8,4"/>
             <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding Summary.Metrics.UclkMHz, StringFormat=\{0:F2\}}" Classes="value-highlight"/>
+            <TextBlock Grid.Row="3" Grid.Column="0" Text="Core:" Classes="label" Margin="0,0,8,4"/>
+            <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding Summary.Metrics.CoreClockMHz, StringFormat=\{0:F0\} MHz}" Classes="value-highlight"/>
+          </Grid>
+        </StackPanel>
+      </Border>
+      <Border Grid.Column="3" Classes="section" Margin="4,0,0,0">
+        <StackPanel Spacing="8">
+          <TextBlock Text="PPT &amp; temp" Classes="label"/>
+          <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto">
+            <TextBlock Grid.Row="0" Grid.Column="0" Text="PPT:" Classes="label" Margin="0,0,8,6"/>
+            <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding Summary.Metrics.CpuPptWatts, StringFormat=\{0:F2\} W}" Classes="value-highlight" Margin="0,0,0,6"/>
+            <TextBlock Grid.Row="1" Grid.Column="0" Text="Core temps:" Classes="label" Margin="0,4,8,6"/>
+            <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding CoreTempsDisplay}" Classes="value-highlight" TextWrapping="Wrap" Margin="0,4,0,6"/>
+            <TextBlock Grid.Row="2" Grid.Column="0" Text="VCORE:" Classes="label" Margin="0,4,8,0"/>
+            <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding Summary.Metrics.Vcore, StringFormat=\{0:F3\} V}" Classes="value-highlight" Margin="0,4,0,0"/>
           </Grid>
         </StackPanel>
       </Border>
@@ -215,7 +230,7 @@
     <!-- Footer -->
     <Grid Grid.Row="3" Grid.ColumnSpan="4" Margin="0,12,0,0" ColumnDefinitions="*,Auto">
       <TextBlock Grid.Column="0" Classes="footer-muted" VerticalAlignment="Center"
-                 Text="DRAM timings &amp; MCLK/UCLK: SMN. Voltages &amp; FCLK: PM table."/>
+                 Text="DRAM timings &amp; MCLK/UCLK: SMN. Voltages, FCLK, power, core: PM table / zenpower."/>
       <TextBlock Grid.Column="1" Text="DDR5" Classes="value-highlight" FontWeight="SemiBold" VerticalAlignment="Center"/>
     </Grid>
   </Grid>

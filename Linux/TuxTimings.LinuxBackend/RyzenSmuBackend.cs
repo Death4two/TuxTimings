@@ -67,6 +67,13 @@ public sealed class RyzenSmuBackend : IHardwareBackend
 
             if (values.Count == 0) return null;
 
+            var coreTemps = new List<float>();
+            for (int i = 0; i < 8; i++)
+            {
+                if (values.TryGetValue("CORE_TEMP_" + i, out var ct))
+                    coreTemps.Add(ct);
+            }
+
             return new SmuMetrics
             {
                 FclkMHz = values.GetValueOrDefault("FCLK"),
@@ -76,7 +83,14 @@ public sealed class RyzenSmuBackend : IHardwareBackend
                 Vddp = values.GetValueOrDefault("VDDP"),
                 VddgIod = values.GetValueOrDefault("VDDG_IOD"),
                 VddgCcd = values.GetValueOrDefault("VDDG_CCD"),
-                VddMisc = values.GetValueOrDefault("VDD_MISC")
+                VddMisc = values.GetValueOrDefault("VDD_MISC"),
+                Vcore = PlausibleVcore(values.GetValueOrDefault("VCORE")),
+                CpuPackagePowerWatts = values.GetValueOrDefault("POWER"),
+                CpuPptWatts = values.GetValueOrDefault("PPT"),
+                CpuPackageCurrentAmps = values.GetValueOrDefault("CURRENT"),
+                CpuTempCelsius = values.GetValueOrDefault("TEMP") is var t && t > 0 ? t : values.GetValueOrDefault("TDIE"),
+                CoreTempsCelsius = coreTemps,
+                CoreClockMHz = values.GetValueOrDefault("CORE_MHZ")
             };
         }
         catch
@@ -123,6 +137,10 @@ public sealed class RyzenSmuBackend : IHardwareBackend
                 $"Raw size: {rawBytes.Length} bytes ({rawBytes.Length / 4} floats)",
                 "",
                 "Parsed metrics (these are what the UI displays):",
+                $"  Package:  {metrics.CpuPackagePowerWatts:F2} W",
+                $"  Current:  {metrics.CpuPackageCurrentAmps:F2} A",
+                $"  Core:     {metrics.CoreClockMHz:F0} MHz",
+                $"  Temp:     {metrics.CpuTempCelsius:F1} °C",
                 $"  FCLK:     {metrics.FclkMHz:F0} MHz",
                 $"  UCLK:     {metrics.UclkMHz:F0} MHz",
                 $"  MCLK:     {metrics.MclkMHz:F0} MHz",
@@ -425,17 +443,36 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
             }
             else
             {
-                // Generic fallback: just surface first few entries.
-                float cpuPower = count > 0 ? floats[0] : 0;
-                float cpuTemp = count > 1 ? floats[1] : 0;
-                float coreClock = count > 2 ? floats[2] : 0;
+                // Generic fallback: try plausible indices for power/core/current/temp (same logic as parse_pm_table.py).
+                float cpuPower = TryPlausiblePower(floats);
+                float coreClock = TryPlausibleCoreClock(floats);
+                float packageCurrent = TryPlausibleCurrent(floats);
+                float cpuTemp = TryPlausibleTemp(floats);
                 float memClock = count > 3 ? floats[3] : 0;
+                if (coreClock == 0 && count > 2) { float v = floats[2]; if (v >= 0.5f && v <= 6.5f) coreClock = v * 1000f; else if (v >= 500f && v <= 6500f) coreClock = v; }
+                if (coreClock == 0) coreClock = TryReadCpufreqMHz();
+
+                var (pptW, coreTemps, tdieC, coreClocksGhz) = ReadKnownPmIndices(floats);
+                if (coreClocksGhz.Length > 0)
+                {
+                    float maxGhz = coreClocksGhz[0];
+                    for (int i = 1; i < coreClocksGhz.Length; i++)
+                        if (coreClocksGhz[i] > maxGhz) maxGhz = coreClocksGhz[i];
+                    if (maxGhz >= 0.5f && maxGhz <= 6.5f) coreClock = maxGhz * 1000f;
+                }
+                if (tdieC > 0) cpuTemp = tdieC;
+                else if (cpuTemp == 0) cpuTemp = TryPlausibleTemp(floats);
 
                 baseMetrics = new SmuMetrics
                 {
                     CpuPackagePowerWatts = cpuPower,
+                    CpuPptWatts = pptW,
+                    CpuPackageCurrentAmps = packageCurrent,
+                    Vcore = 0f,
                     CpuTempCelsius = cpuTemp,
+                    CoreTempsCelsius = coreTemps,
                     CoreClockMHz = coreClock,
+                    CoreClocksGhz = coreClocksGhz,
                     MemoryClockMHz = memClock
                 };
             }
@@ -604,18 +641,209 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
         float vddgIod = Get(pt, offsetCldoVddgIod);
         float vddgCcd = Get(pt, offsetCldoVddgCcd);
         float vddMisc = Get(pt, offsetVddMisc);
+        // PM table layout is version-dependent. Try known offsets from ryzen_smu monitor_cpu (0x240903) and common alternatives.
+        // SOCKET_POWER = index 29, CPU_TELEMETRY_POWER = 42, CPU_TELEMETRY_CURRENT = 41; some tables use 0/1/2 for power/temp/core.
+        float packagePower = TryPlausiblePower(pt);
+        float coreClock = TryPlausibleCoreClock(pt);
+        float packageCurrent = TryPlausibleCurrent(pt);
+        if (coreClock == 0) coreClock = TryReadCpufreqMHz();
 
-            return new SmuMetrics
+        var (pptW, coreTemps, tdieC, coreClocksGhz) = ReadKnownPmIndices(pt);
+        if (coreClocksGhz.Length > 0)
+        {
+            float maxGhz = coreClocksGhz[0];
+            for (int i = 1; i < coreClocksGhz.Length; i++)
+                if (coreClocksGhz[i] > maxGhz) maxGhz = coreClocksGhz[i];
+            if (maxGhz >= 0.5f && maxGhz <= 6.5f) coreClock = maxGhz * 1000f;
+        }
+
+        float cpuTemp = tdieC > 0 ? tdieC : TryPlausibleTemp(pt);
+
+        // PM table index 271 = core voltage (Granite Ridge, from watch_pm_table)
+        float vcore = 271 < pt.Length ? PlausibleVcore(pt[271]) : 0f;
+        return new SmuMetrics
+        {
+            CpuPackagePowerWatts = packagePower,
+            CpuPptWatts = pptW,
+            CpuPackageCurrentAmps = packageCurrent,
+            Vcore = vcore,
+            CpuTempCelsius = cpuTemp,
+            CoreTempsCelsius = coreTemps,
+            CoreClockMHz = coreClock,
+            CoreClocksGhz = coreClocksGhz,
+            FclkMHz = fclk,
+            UclkMHz = uclk,
+            MclkMHz = mclk,
+            Vsoc = vsoc,
+            Vddp = vddp,
+            VddgIod = vddgIod,
+            VddgCcd = vddgCcd,
+            VddMisc = vddMisc
+        };
+    }
+
+    /// <summary>Read current CPU frequency from Linux cpufreq (kHz → MHz). Returns 0 if unavailable.</summary>
+    private static float TryReadCpufreqMHz()
+    {
+        try
+        {
+            for (int i = 0; i < 64; i++)
             {
-                FclkMHz = fclk,
-                UclkMHz = uclk,
-                MclkMHz = mclk,
-                Vsoc = vsoc,
-                Vddp = vddp,
-                VddgIod = vddgIod,
-                VddgCcd = vddgCcd,
-                VddMisc = vddMisc
-            };
+                var path = $"/sys/devices/system/cpu/cpu{i}/cpufreq/scaling_cur_freq";
+                if (!File.Exists(path)) continue;
+                var s = File.ReadAllText(path).Trim();
+                if (int.TryParse(s, out var khz) && khz > 0) return khz / 1000f;
+            }
+        }
+        catch { }
+        return 0;
+    }
+
+    /// <summary>Read known PM table indices: 3/26 = CPU PPT (W), 317–324 = core temps (°C), 448/449 = tdie (°C), 325–340 = core clocks (GHz).</summary>
+    private static (float PptWatts, float[] CoreTemps, float TdieCelsius, float[] CoreClocksGhz) ReadKnownPmIndices(float[] pt)
+    {
+        float ppt = 0;
+        if (pt != null && pt.Length > 26)
+        {
+            float v3 = pt[3], v26 = pt[26];
+            if (v3 >= 1f && v3 <= 400f) ppt = v3;
+            else if (v26 >= 1f && v26 <= 400f) ppt = v26;
+        }
+
+        float[] coreTemps = Array.Empty<float>();
+        if (pt != null && pt.Length > 324)
+        {
+            coreTemps = new float[8];
+            for (int i = 0; i < 8; i++)
+                coreTemps[i] = pt[317 + i];
+        }
+
+        float tdie = 0;
+        if (pt != null && pt.Length > 449)
+        {
+            float a = pt[448], b = pt[449];
+            if (a >= 1f && a <= 150f) tdie = a;
+            else if (b >= 1f && b <= 150f) tdie = b;
+            else if (a > 0 && b > 0) tdie = (a + b) * 0.5f;
+        }
+
+        float[] coreClocksGhz = Array.Empty<float>();
+        if (pt != null && pt.Length > 340)
+        {
+            coreClocksGhz = new float[16];
+            for (int i = 0; i < 16; i++)
+                coreClocksGhz[i] = pt[325 + i];
+        }
+
+        return (ppt, coreTemps, tdie, coreClocksGhz);
+    }
+
+    /// <summary>Try candidate float indices for package power (W). Plausible: 0.5–400 W.</summary>
+    private static float TryPlausiblePower(float[] pt)
+    {
+        if (pt == null || pt.Length == 0) return 0;
+        int[] candidates = { 220, 187, 29, 42, 0, 1 }; // 220/187 from PM table dumps, then SOCKET_POWER, CPU_TELEMETRY_POWER, early
+        foreach (var i in candidates)
+        {
+            if (i >= pt.Length) continue;
+            float v = pt[i];
+            if (v >= 0.5f && v <= 400f) return v;
+        }
+        return 0;
+    }
+
+    /// <summary>Try candidate indices for core frequency (MHz). Plausible: 500–6500 MHz.</summary>
+    private static float TryPlausibleCoreClock(float[] pt)
+    {
+        if (pt == null || pt.Length == 0) return 0;
+        int[] candidates = { 2, 48, 49 }; // early layout; FCLK_FREQ/FCLK_FREQ_EFF in 0x240903 (kHz? check)
+        foreach (var i in candidates)
+        {
+            if (i >= pt.Length) continue;
+            float v = pt[i];
+            if (v >= 500f && v <= 6500f) return v;
+            if (v >= 0.5f && v <= 6.5f) return v * 1000f; // might be in GHz
+        }
+        return 0;
+    }
+
+    /// <summary>Try candidate indices for package current (A). Plausible: 0.5–200 A.</summary>
+    private static float TryPlausibleCurrent(float[] pt)
+    {
+        if (pt == null || pt.Length == 0) return 0;
+        int[] candidates = { 41, 46, 3, 10, 11, 4 }; // CPU_TELEMETRY_CURRENT, SOC, TDC/EDC; 10,11 from dumps
+        foreach (var i in candidates)
+        {
+            if (i >= pt.Length) continue;
+            float v = pt[i];
+            if (v >= 0.5f && v <= 200f) return v;
+        }
+        return 0;
+    }
+
+    /// <summary>Try candidate indices for CPU temp / tdie (°C). Plausible: 1–150 °C.</summary>
+    private static float TryPlausibleTemp(float[] pt)
+    {
+        if (pt == null || pt.Length == 0) return 0;
+        int[] candidates = { 1, 448, 449 }; // early temp, tdie
+        foreach (var i in candidates)
+        {
+            if (i >= pt.Length) continue;
+            float v = pt[i];
+            if (v >= 1f && v <= 150f) return v;
+        }
+        return 0;
+    }
+
+    /// <summary>Return value if in plausible core voltage range (0.25–2.2 V), else 0.</summary>
+    private static float PlausibleVcore(float v)
+    {
+        return v >= 0.25f && v <= 2.2f ? v : 0f;
+    }
+
+    // SVI2 telemetry SMN addresses. Family 17h (Zen1–Zen3) from zenpower/LibreHardwareMonitor.
+    // Zen 5 (Family 1Ah / Granite Ridge): no public SVI2 spec; we try the same base in case SMU kept compatibility.
+    private const uint Svi2Plane0Addr = 0x0005A00C; // Core for Zen1, SoC for Zen2 Ryzen
+    private const uint Svi2Plane1Addr = 0x0005A010; // SoC for Zen1, Core for Zen2 Ryzen
+
+    /// <summary>Read SVI2 telemetry via SMN (voltage/current). Formulas from zenpower; Zen2 current scale. Zen 5: same addresses tried.</summary>
+    private static (float CoreV, float CoreA, float SocV, float SocA)? TryReadSvi2Telemetry()
+    {
+        try
+        {
+            uint p0 = ReadSmn(Svi2Plane0Addr);
+            uint p1 = ReadSmn(Svi2Plane1Addr);
+
+            static float PlaneToVoltageMV(uint plane)
+            {
+                uint vddCor = (plane >> 16) & 0xFF;
+                return 1550f - (625f * vddCor / 100f); // mV
+            }
+
+            // Zen2 current scale (658.823 * idd); idd = low 8 bits. Result mA.
+            static float PlaneToCurrentMA(uint plane)
+            {
+                uint idd = plane & 0xFF;
+                return (658823f * idd) / 1000f;
+            }
+
+            float v0 = PlaneToVoltageMV(p0) / 1000f;
+            float a0 = PlaneToCurrentMA(p0) / 1000f;
+            float v1 = PlaneToVoltageMV(p1) / 1000f;
+            float a1 = PlaneToCurrentMA(p1) / 1000f;
+
+            // Plausible: V 0.3–2 V, A 0.01–200 A
+            bool ok0 = v0 >= 0.3f && v0 <= 2f && a0 >= 0.01f && a0 <= 200f;
+            bool ok1 = v1 >= 0.3f && v1 <= 2f && a1 >= 0.01f && a1 <= 200f;
+            if (!ok0 && !ok1) return null;
+
+            // Report plane0 as Core, plane1 as SoC (Zen1 order); on Zen2 they're swapped but both rails are valid
+            return (v0, a0, v1, a1);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static SmuMetrics ApplyZenpowerOverrides(SmuMetrics metrics)
@@ -645,6 +873,14 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
             float memVddq = metrics.MemVddq;
             float memVpp = metrics.MemVpp;
             float vsoc = metrics.Vsoc;
+            float powerW = metrics.CpuPackagePowerWatts;
+            float currentA = metrics.CpuPackageCurrentAmps;
+
+            // power1_input = microwatts, curr1_input = milliamps (hwmon convention)
+            TryReadHwmonFloat(zpPath, "power1_input", out var powerUw);
+            if (powerUw > 0) powerW = powerUw / 1_000_000f;
+            TryReadHwmonFloat(zpPath, "curr1_input", out var currentMa);
+            if (currentMa > 0) currentA = currentMa / 1000f;
 
             foreach (var labelPath in Directory.GetFiles(zpPath, "in*_label"))
             {
@@ -673,9 +909,14 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
 
             return new SmuMetrics
             {
-                CpuPackagePowerWatts = metrics.CpuPackagePowerWatts,
+                CpuPackagePowerWatts = powerW,
+                CpuPptWatts = metrics.CpuPptWatts,
+                CpuPackageCurrentAmps = currentA,
+                Vcore = metrics.Vcore,
                 CpuTempCelsius = metrics.CpuTempCelsius,
+                CoreTempsCelsius = metrics.CoreTempsCelsius,
                 CoreClockMHz = metrics.CoreClockMHz,
+                CoreClocksGhz = metrics.CoreClocksGhz,
                 MemoryClockMHz = metrics.MemoryClockMHz,
                 FclkMHz = metrics.FclkMHz,
                 UclkMHz = metrics.UclkMHz,
@@ -695,6 +936,14 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
         {
             return metrics;
         }
+    }
+
+    private static bool TryReadHwmonFloat(string hwmonDir, string file, out float value)
+    {
+        value = 0;
+        var path = Path.Combine(hwmonDir, file);
+        if (!File.Exists(path)) return false;
+        return float.TryParse(File.ReadAllText(path).Trim(), out value);
     }
 
     private static DramTimingsModel ReadGraniteRidgeDdr5Timings()
