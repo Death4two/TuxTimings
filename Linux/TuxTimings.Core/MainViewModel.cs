@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Linq;
 using System.Runtime.CompilerServices;
@@ -21,12 +22,142 @@ public sealed class MainViewModel : INotifyPropertyChanged
         private set
         {
             _summary = value;
+            var modules = _summary.Modules ?? Array.Empty<MemoryModule>();
+            if (modules.Count == 0)
+                _selectedModuleIndex = -1;
+            else if (_selectedModuleIndex < 0 || _selectedModuleIndex >= modules.Count)
+                _selectedModuleIndex = 0;
             OnPropertyChanged();
+            OnPropertyChanged(nameof(Modules));
+            OnPropertyChanged(nameof(SelectedModuleIndex));
+            OnPropertyChanged(nameof(SelectedModuleCapacity));
+            OnPropertyChanged(nameof(SelectedModuleManufacturer));
+            OnPropertyChanged(nameof(SelectedModulePartNumber));
+            OnPropertyChanged(nameof(SelectedModuleSerialNumber));
+            OnPropertyChanged(nameof(SelectedModuleRankDisplay));
+            OnPropertyChanged(nameof(SelectedPhyRdl));
+            UpdateSelectedPhyRdlDisplay();
             OnPropertyChanged(nameof(CoreTempsDisplay));
             OnPropertyChanged(nameof(TctlTccdDisplay));
             OnPropertyChanged(nameof(FanDisplayLines));
             OnPropertyChanged(nameof(PumpDisplay));
             OnPropertyChanged(nameof(BclkMHz));
+        }
+    }
+
+    /// <summary>Installed DIMMs from dmidecode -t 17 for dropdown.</summary>
+    public IReadOnlyList<MemoryModule> Modules => Summary.Modules ?? Array.Empty<MemoryModule>();
+
+    private int _selectedModuleIndex = -1;
+    private string _selectedPhyRdlDisplay = "—";
+    /// <summary>Selected DIMM index in Modules; -1 when none. Bound to ComboBox SelectedIndex.</summary>
+    public int SelectedModuleIndex
+    {
+        get => _selectedModuleIndex;
+        set
+        {
+            var modules = Summary.Modules ?? Array.Empty<MemoryModule>();
+            var clamped = value < 0 ? -1 : (value >= modules.Count ? (modules.Count > 0 ? modules.Count - 1 : -1) : value);
+            if (_selectedModuleIndex == clamped) return;
+            _selectedModuleIndex = clamped;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(SelectedModuleCapacity));
+            OnPropertyChanged(nameof(SelectedModuleManufacturer));
+            OnPropertyChanged(nameof(SelectedModulePartNumber));
+            OnPropertyChanged(nameof(SelectedModuleSerialNumber));
+            OnPropertyChanged(nameof(SelectedModuleRankDisplay));
+            OnPropertyChanged(nameof(SelectedPhyRdl));
+            UpdateSelectedPhyRdlDisplay();
+        }
+    }
+
+    private void UpdateSelectedPhyRdlDisplay()
+    {
+        var val = SelectedPhyRdl.ToString();
+        if (_selectedPhyRdlDisplay == val) return;
+        _selectedPhyRdlDisplay = val;
+        OnPropertyChanged(nameof(SelectedPhyRdlDisplay));
+    }
+
+    /// <summary>Serial number of the selected DIMM or "—".</summary>
+    public string SelectedModuleSerialNumber
+    {
+        get
+        {
+            var mod = SelectedModule;
+            return mod != null && !string.IsNullOrEmpty(mod.SerialNumber) ? mod.SerialNumber : "—";
+        }
+    }
+
+    /// <summary>Rank of the selected DIMM from dmidecode: SR, DR, or QR.</summary>
+    public string SelectedModuleRankDisplay
+    {
+        get
+        {
+            var mod = SelectedModule;
+            if (mod == null) return "—";
+            return mod.Rank switch
+            {
+                MemRank.SR => "SR",
+                MemRank.DR => "DR",
+                MemRank.QR => "QR",
+                _ => "SR"
+            };
+        }
+    }
+
+    /// <summary>tPHYRDL for the selected DIMM (per-channel) or global PhyRdl fallback.</summary>
+    public uint SelectedPhyRdl
+    {
+        get
+        {
+            var perCh = Summary.DramTimings?.PhyRdlPerChannel;
+            if (perCh != null && _selectedModuleIndex >= 0 && _selectedModuleIndex < perCh.Count)
+                return perCh[_selectedModuleIndex];
+            return Summary.DramTimings?.PhyRdl ?? 0;
+        }
+    }
+
+    /// <summary>tPHYRDL as string for UI binding; updated explicitly when selection or Summary changes.</summary>
+    public string SelectedPhyRdlDisplay => _selectedPhyRdlDisplay;
+
+    /// <summary>Capacity of the selected DIMM (e.g. "16.0 GiB") or "—".</summary>
+    public string SelectedModuleCapacity
+    {
+        get
+        {
+            var mod = SelectedModule;
+            return mod != null ? mod.CapacityDisplay : "—";
+        }
+    }
+
+    /// <summary>Manufacturer of the selected DIMM or "—".</summary>
+    public string SelectedModuleManufacturer
+    {
+        get
+        {
+            var mod = SelectedModule;
+            return mod != null && !string.IsNullOrEmpty(mod.Manufacturer) ? mod.Manufacturer : "—";
+        }
+    }
+
+    /// <summary>Part number of the selected DIMM or "—".</summary>
+    public string SelectedModulePartNumber
+    {
+        get
+        {
+            var mod = SelectedModule;
+            return mod != null && !string.IsNullOrEmpty(mod.PartNumber) ? mod.PartNumber : "—";
+        }
+    }
+
+    private MemoryModule? SelectedModule
+    {
+        get
+        {
+            var modules = Summary.Modules ?? Array.Empty<MemoryModule>();
+            if (_selectedModuleIndex < 0 || _selectedModuleIndex >= modules.Count) return null;
+            return modules[_selectedModuleIndex];
         }
     }
 

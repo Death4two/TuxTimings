@@ -101,6 +101,10 @@ public sealed class RyzenSmuBackend : IHardwareBackend
     private static bool _hasDumpedOnce;
     private static bool _hasDumpedDiagnostic;
 
+    /// <summary>Cached dmidecode result; only run on first load, not every sensor refresh.</summary>
+    private static bool _dmidecodeCached;
+    private static (string ProcessorName, string PartNumbers, string Manufacturers, string MotherboardProductName, string BiosVersion, string BiosReleaseDate, IReadOnlyList<MemoryModule> Modules)? _cachedDmidecode;
+
     private static string GetDumpDirectory()
     {
         // When running with sudo, use /tmp so the real user can find the dump.
@@ -202,7 +206,7 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
 
     public SystemSummary ReadSummary()
     {
-        var (processorName, partNumbers, motherboardProductName, biosVersion, biosReleaseDate) = ReadDmidecode();
+        var (processorName, partNumbers, manufacturers, motherboardProductName, biosVersion, biosReleaseDate, modules) = ReadDmidecode();
         var codenameIndex = ReadCodenameIndex();
 
         var cpu = new CpuInfoModel
@@ -226,6 +230,7 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
             Frequency = isGraniteRidge ? dramTimings.FrequencyHintMHz : 0,
             Type = isGraniteRidge ? MemType.DDR5 : MemType.Unknown,
             TotalCapacity = ReadTotalMemory(),
+            Manufacturer = manufacturers,
             PartNumber = partNumbers
         };
 
@@ -243,7 +248,7 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
             Cpu = cpu,
             Memory = memory,
             BoardInfo = boardInfo,
-            Modules = Array.Empty<MemoryModule>(),
+            Modules = modules,
             Metrics = metrics,
             DramTimings = dramTimings,
             Fans = fans
@@ -293,23 +298,27 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
     /// Runs dmidecode to get processor name, RAM part numbers, motherboard, and BIOS info.
     /// Called before displaying the main window. Requires root for full access.
     /// </summary>
-    private static (string ProcessorName, string PartNumbers, string MotherboardProductName, string BiosVersion, string BiosReleaseDate) ReadDmidecode()
+    private static (string ProcessorName, string PartNumbers, string Manufacturers, string MotherboardProductName, string BiosVersion, string BiosReleaseDate, IReadOnlyList<MemoryModule> Modules) ReadDmidecode()
     {
+        if (_dmidecodeCached && _cachedDmidecode.HasValue)
+            return _cachedDmidecode.Value;
+
         var processorName = string.Empty;
-        var partNumbers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var partNumbers = new List<string>();
+        var manufacturerStr = string.Empty;
         var motherboardProductName = string.Empty;
         var biosVersion = string.Empty;
         var biosReleaseDate = string.Empty;
+        IReadOnlyList<MemoryModule> modules = Array.Empty<MemoryModule>();
 
         try
         {
             processorName = RunDmidecodeAndParse("processor", ParseProcessor).Trim();
-            var memResult = RunDmidecodeAndParse("memory", ParseMemory);
-            foreach (var pn in memResult.Split('\n', StringSplitOptions.RemoveEmptyEntries))
-            {
-                if (!string.IsNullOrWhiteSpace(pn))
-                    partNumbers.Add(pn.Trim());
-            }
+            var memStdout = RunDmidecodeAndParse("memory", s => s);
+            var (parsedModules, parsedPartNumbers, manufacturers) = ParseMemoryDevices(memStdout);
+            modules = parsedModules;
+            partNumbers = parsedPartNumbers;
+            manufacturerStr = string.Join(", ", manufacturers);
 
             motherboardProductName = RunDmidecodeString("baseboard-product-name");
             biosVersion = RunDmidecodeString("bios-version");
@@ -320,7 +329,120 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
             // dmidecode may require root; ignore
         }
 
-        return (processorName, string.Join(", ", partNumbers), motherboardProductName, biosVersion, biosReleaseDate);
+        var result = (processorName, string.Join(", ", partNumbers), manufacturerStr, motherboardProductName, biosVersion, biosReleaseDate, modules);
+        _cachedDmidecode = result;
+        _dmidecodeCached = true;
+        return result;
+    }
+
+    /// <summary>Parses dmidecode -t 17 output; returns list of installed modules and aggregated part numbers/manufacturers.</summary>
+    private static (List<MemoryModule> Modules, List<string> PartNumbers, List<string> Manufacturers) ParseMemoryDevices(string stdout)
+    {
+        var modules = new List<MemoryModule>();
+        var partNumbers = new List<string>();
+        var manufacturers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var lines = stdout.Split('\n');
+        var inMem = false;
+        string? size = null, locator = null, bankLocator = null, manufacturer = null, partNumber = null, serialNumber = null;
+        MemRank rank = MemRank.SR;
+
+        void FlushBlock()
+        {
+            if (string.IsNullOrEmpty(size) || size.Contains("No Module", StringComparison.OrdinalIgnoreCase))
+                return;
+            ulong capacityBytes = ParseSizeToBytes(size);
+            var mod = new MemoryModule
+            {
+                DeviceLocator = locator ?? string.Empty,
+                BankLabel = bankLocator ?? string.Empty,
+                Slot = locator ?? string.Empty,
+                CapacityBytes = capacityBytes,
+                Manufacturer = manufacturer ?? string.Empty,
+                PartNumber = partNumber ?? string.Empty,
+                SerialNumber = serialNumber ?? string.Empty,
+                Rank = rank
+            };
+            modules.Add(mod);
+            if (!string.IsNullOrEmpty(mod.PartNumber) && mod.PartNumber != "Unknown" && mod.PartNumber != "NO DIMM")
+                partNumbers.Add(mod.PartNumber);
+            if (!string.IsNullOrEmpty(mod.Manufacturer) && mod.Manufacturer != "Unknown" && mod.Manufacturer != "NO DIMM")
+                manufacturers.Add(mod.Manufacturer);
+        }
+
+        foreach (var line in lines)
+        {
+            if (line.Contains("Memory Device", StringComparison.OrdinalIgnoreCase))
+            {
+                FlushBlock();
+                size = null; locator = null; bankLocator = null; manufacturer = null; partNumber = null; serialNumber = null;
+                rank = MemRank.SR;
+                inMem = true;
+                continue;
+            }
+            if (inMem && line.StartsWith("\t", StringComparison.Ordinal) == false && line.Trim().Length > 0)
+                inMem = false;
+            if (!inMem) continue;
+
+            var trimmed = line.TrimStart();
+            if (trimmed.StartsWith("Size:", StringComparison.OrdinalIgnoreCase))
+                size = GetValueAfterColon(line);
+            else if (trimmed.StartsWith("Locator:", StringComparison.OrdinalIgnoreCase))
+                locator = GetValueAfterColon(line);
+            else if (trimmed.StartsWith("Bank Locator:", StringComparison.OrdinalIgnoreCase))
+                bankLocator = GetValueAfterColon(line);
+            else if (trimmed.StartsWith("Manufacturer:", StringComparison.OrdinalIgnoreCase))
+                manufacturer = GetValueAfterColon(line);
+            else if (trimmed.StartsWith("Part Number:", StringComparison.OrdinalIgnoreCase))
+                partNumber = GetValueAfterColon(line);
+            else if (trimmed.StartsWith("Serial Number:", StringComparison.OrdinalIgnoreCase))
+                serialNumber = GetValueAfterColon(line);
+            else if (trimmed.StartsWith("Rank:", StringComparison.OrdinalIgnoreCase))
+            {
+                var rankStr = GetValueAfterColon(line);
+                rank = rankStr switch
+                {
+                    "1" => MemRank.SR,
+                    "2" => MemRank.DR,
+                    "4" => MemRank.QR,
+                    _ => MemRank.SR
+                };
+            }
+        }
+        FlushBlock();
+
+        // Sort by channel (A before B) so module index matches UMC0/UMC1 and PhyRdlPerChannel
+        static int ChannelOrder(string? bankLoc)
+        {
+            if (string.IsNullOrEmpty(bankLoc)) return 0;
+            if (bankLoc.Contains("CHANNEL B", StringComparison.OrdinalIgnoreCase)) return 1;
+            if (bankLoc.Contains("CHANNEL A", StringComparison.OrdinalIgnoreCase)) return 0;
+            return 0;
+        }
+        modules.Sort((a, b) => ChannelOrder(a.BankLabel).CompareTo(ChannelOrder(b.BankLabel)));
+
+        return (modules, partNumbers, manufacturers.ToList());
+    }
+
+    private static string GetValueAfterColon(string line)
+    {
+        var colon = line.IndexOf(':', StringComparison.Ordinal);
+        return colon >= 0 ? line[(colon + 1)..].Trim() : string.Empty;
+    }
+
+    private static ulong ParseSizeToBytes(string size)
+    {
+        if (string.IsNullOrWhiteSpace(size)) return 0;
+        var parts = size.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length < 2) return 0;
+        if (!double.TryParse(parts[0], out var value)) return 0;
+        var unit = parts[1].AsSpan();
+        if (unit.StartsWith("GiB", StringComparison.OrdinalIgnoreCase) || unit.StartsWith("GB", StringComparison.OrdinalIgnoreCase))
+            return (ulong)(value * 1024 * 1024 * 1024);
+        if (unit.StartsWith("MiB", StringComparison.OrdinalIgnoreCase) || unit.StartsWith("MB", StringComparison.OrdinalIgnoreCase))
+            return (ulong)(value * 1024 * 1024);
+        if (unit.StartsWith("KiB", StringComparison.OrdinalIgnoreCase) || unit.StartsWith("KB", StringComparison.OrdinalIgnoreCase))
+            return (ulong)(value * 1024);
+        return 0;
     }
 
     /// <summary>Runs dmidecode -s &lt;keyword&gt; and returns trimmed stdout (e.g. baseboard-product-name, bios-version).</summary>
@@ -397,30 +519,6 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
                 break;
         }
         return string.Empty;
-    }
-
-    private static string ParseMemory(string stdout)
-    {
-        var partNumbers = new List<string>();
-        var inMem = false;
-        foreach (var line in stdout.Split('\n'))
-        {
-            if (line.Contains("Memory Device", StringComparison.OrdinalIgnoreCase))
-            {
-                inMem = true;
-                continue;
-            }
-            if (inMem && line.TrimStart().StartsWith("Part Number:", StringComparison.OrdinalIgnoreCase))
-            {
-                var colon = line.IndexOf(':', StringComparison.Ordinal);
-                var pn = colon >= 0 ? line[(colon + 1)..].Trim() : string.Empty;
-                if (!string.IsNullOrEmpty(pn) && pn != "Unknown" && pn != "NO DIMM")
-                    partNumbers.Add(pn);
-            }
-            if (inMem && line.StartsWith("\t", StringComparison.Ordinal) == false && line.Trim().Length > 0)
-                inMem = false;
-        }
-        return string.Join("\n", partNumbers);
     }
 
     private static SmuMetrics ReadMetrics(int codenameIndex)
@@ -1196,6 +1294,13 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
             uint reg50258 = ReadSmn(offset | 0x50258);
             uint reg502A4 = ReadSmn(offset | 0x502A4);
 
+            // tPHYRDL per UMC for per-DIMM display (UMC0 = offset 0, UMC1 = 0x10000)
+            const uint umc1Offset = 0x10000u;
+            uint reg50258Umc1 = ReadSmn(umc1Offset | 0x50258);
+            uint phyRdlUmc0 = BitSlice(reg50258, 23, 16);
+            uint phyRdlUmc1 = BitSlice(reg50258Umc1, 23, 16);
+            var phyRdlPerChannel = new uint[] { phyRdlUmc0, phyRdlUmc1 };
+
             uint tcl = BitSlice(reg50204, 5, 0);
             uint trcdRd = BitSlice(reg50204, 21, 16);
             uint trcdWr = BitSlice(reg50204, 29, 24);
@@ -1339,6 +1444,7 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
                 PhyWrd = phyWrd,
                 PhyWrl = phyWrl,
                 PhyRdl = phyRdl,
+                PhyRdlPerChannel = phyRdlPerChannel,
                 Refi = refi,
                 Wrpre = wrpre,
                 Rdpre = rdpre,

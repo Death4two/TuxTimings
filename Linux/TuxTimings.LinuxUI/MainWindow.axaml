@@ -3,18 +3,27 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         x:Class="TuxTimings.LinuxUI.MainWindow"
-        Width="900" Height="720"
+        Width="900" Height="780"
         MinWidth="900" MaxWidth="900"
-        MinHeight="720" MaxHeight="720"
+        MinHeight="780" MaxHeight="780"
         CanResize="False"
         Title="TuxTimings"
         Background="#0D1117"
         FontFamily="Segoe UI, Liberation Sans, DejaVu Sans, sans-serif"
         FontSize="13">
   <Grid RowDefinitions="Auto,Auto,*,Auto" Margin="10,10,10,14">
-    <!-- Header: processor name centered, then codename/board + app version -->
+    <!-- Header: CPU name left, DIMM dropdown right; then codename/board left, app version right -->
     <Grid Grid.Row="0" Margin="0,0,0,12" RowDefinitions="Auto,Auto" ColumnDefinitions="*,Auto">
-      <TextBlock Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2" Text="{Binding Summary.Cpu.DisplayName}" Classes="header-title" TextAlignment="Center" HorizontalAlignment="Stretch"/>
+      <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding Summary.Cpu.DisplayName}" Classes="header-title" VerticalAlignment="Center"/>
+      <ComboBox Grid.Row="0" Grid.Column="1" ItemsSource="{Binding Modules}" SelectedIndex="{Binding SelectedModuleIndex, Mode=TwoWay}"
+                MinWidth="180" HorizontalAlignment="Right" VerticalAlignment="Center"
+                Background="#161B22" Foreground="#E6EDF3" BorderBrush="#30363D">
+        <ComboBox.ItemTemplate>
+          <DataTemplate>
+            <TextBlock Text="{Binding SlotDisplay}" Foreground="#E6EDF3"/>
+          </DataTemplate>
+        </ComboBox.ItemTemplate>
+      </ComboBox>
       <StackPanel Grid.Row="1" Grid.Column="0" Margin="0,4,0,0">
         <TextBlock Text="{Binding Summary.Cpu.CodeName}" Classes="header-muted"/>
         <TextBlock Text="{Binding Summary.Cpu.SmuVersion}" Classes="footer-muted" Margin="0,2,0,0"/>
@@ -40,10 +49,17 @@
       </Border>
       <Border Grid.Column="1" Classes="section" Margin="2,0">
         <StackPanel Spacing="6">
-          <TextBlock Text="Capacity" Classes="section-title" Margin="0,0,0,4"/>
-          <TextBlock Text="{Binding Summary.Memory.TotalCapacity}" Classes="value-highlight"/>
-          <TextBlock Text="Part Number" Classes="label" Margin="0,4,0,0"/>
-          <TextBlock Text="{Binding Summary.Memory.PartNumber}" Classes="value-highlight" TextWrapping="Wrap"/>
+          <TextBlock Text="DIMM" Classes="section-title" Margin="0,0,0,4"/>
+          <TextBlock Text="Capacity:" Classes="label" Margin="0,0,0,0"/>
+          <TextBlock Text="{Binding SelectedModuleCapacity}" Classes="value-highlight"/>
+          <TextBlock Text="Manufacturer:" Classes="label" Margin="0,4,0,0"/>
+          <TextBlock Text="{Binding SelectedModuleManufacturer}" Classes="value-highlight" TextWrapping="Wrap"/>
+          <TextBlock Text="Part Number:" Classes="label" Margin="0,4,0,0"/>
+          <TextBlock Text="{Binding SelectedModulePartNumber}" Classes="value-highlight" TextWrapping="Wrap"/>
+          <TextBlock Text="Serial Number:" Classes="label" Margin="0,4,0,0"/>
+          <TextBlock Text="{Binding SelectedModuleSerialNumber}" Classes="value-highlight"/>
+          <TextBlock Text="Rank:" Classes="label" Margin="0,4,0,0"/>
+          <TextBlock Text="{Binding SelectedModuleRankDisplay}" Classes="value-highlight"/>
           <TextBlock Text="Cmd2T" Classes="label" Margin="0,4,0,0"/>
           <TextBlock Text="{Binding Summary.DramTimings.Cmd2T}" Classes="value-highlight"/>
         </StackPanel>
@@ -199,7 +215,7 @@
               <TextBlock Grid.Row="11" Grid.Column="0" Text="tPHYWRL" Classes="label"/>
               <TextBlock Grid.Row="11" Grid.Column="1" Text="{Binding Summary.DramTimings.PhyWrl}" Classes="value-highlight"/>
               <TextBlock Grid.Row="12" Grid.Column="0" Text="tPHYRDL" Classes="label"/>
-              <TextBlock Grid.Row="12" Grid.Column="1" Text="{Binding Summary.DramTimings.PhyRdl}" Classes="value-highlight"/>
+              <TextBlock Grid.Row="12" Grid.Column="1" Text="{Binding SelectedPhyRdlDisplay}" Classes="value-highlight"/>
               <TextBlock Grid.Row="13" Grid.Column="0" Text="tPHYWRD" Classes="label"/>
               <TextBlock Grid.Row="13" Grid.Column="1" Text="{Binding Summary.DramTimings.PhyWrd}" Classes="value-highlight"/>
             </Grid>

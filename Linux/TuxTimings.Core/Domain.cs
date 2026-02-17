@@ -15,12 +15,49 @@ public sealed class MemoryModule
 {
     public string BankLabel { get; init; } = string.Empty;
     public string PartNumber { get; init; } = string.Empty;
+    public string SerialNumber { get; init; } = string.Empty;
     public string Manufacturer { get; init; } = string.Empty;
     public string DeviceLocator { get; init; } = string.Empty;
     public ulong CapacityBytes { get; init; }
     public uint ClockSpeedMHz { get; init; }
     public MemRank Rank { get; init; }
     public string Slot { get; init; } = string.Empty;
+
+    /// <summary>Capacity for display (e.g. "16.0 GiB").</summary>
+    public string CapacityDisplay
+    {
+        get
+        {
+            if (CapacityBytes == 0) return "—";
+            double gib = CapacityBytes / (1024.0 * 1024.0 * 1024.0);
+            return $"{gib:F1} GiB";
+        }
+    }
+
+    /// <summary>ZenTimings-style slot label from Bank Locator + Locator (e.g. "A1", "B1", "A2", "B2").</summary>
+    public string SlotLabel
+    {
+        get
+        {
+            var channel = string.IsNullOrEmpty(BankLabel) ? null
+                : BankLabel.Contains("CHANNEL B", StringComparison.OrdinalIgnoreCase) ? "B"
+                : BankLabel.Contains("CHANNEL A", StringComparison.OrdinalIgnoreCase) ? "A"
+                : null;
+            var slot = string.IsNullOrEmpty(DeviceLocator) ? null : System.Text.RegularExpressions.Regex.Match(DeviceLocator, @"\d+").Value;
+            if (!string.IsNullOrEmpty(channel) && !string.IsNullOrEmpty(slot)) return $"{channel}{slot}";
+            return string.IsNullOrEmpty(DeviceLocator) ? string.Empty : DeviceLocator;
+        }
+    }
+
+    /// <summary>Label for DIMM dropdown (e.g. "A1 - 16.0 GiB" or "DIMM 1 - 16.0 GiB").</summary>
+    public string SlotDisplay
+    {
+        get
+        {
+            var label = !string.IsNullOrEmpty(SlotLabel) && SlotLabel.Length <= 4 ? SlotLabel : DeviceLocator;
+            return string.IsNullOrEmpty(label) ? CapacityDisplay : $"{label} - {CapacityDisplay}";
+        }
+    }
 }
 
 public enum MemType
@@ -54,6 +91,9 @@ public sealed class MemoryConfigModel : INotifyPropertyChanged
     public MemType Type { get; set; } = MemType.Unknown;
 
     public string TotalCapacity { get; set; } = string.Empty;
+
+    /// <summary>RAM manufacturer(s) from dmidecode -t 17 Manufacturer (e.g. G Skill Intl).</summary>
+    public string Manufacturer { get; set; } = string.Empty;
 
     /// <summary>RAM part number(s) from dmidecode -t memory (e.g. F5-7600J3646G16G).</summary>
     public string PartNumber { get; set; } = string.Empty;
@@ -153,6 +193,8 @@ public sealed class DramTimingsModel
     public uint PhyWrd { get; init; }
     public uint PhyWrl { get; init; }
     public uint PhyRdl { get; init; }
+    /// <summary>tPHYRDL per channel/UMC (index 0 = UMC0, 1 = UMC1). Use for per-DIMM display.</summary>
+    public IReadOnlyList<uint> PhyRdlPerChannel { get; init; } = Array.Empty<uint>();
     public uint Refi { get; init; }
     public uint Wrpre { get; init; }
     public uint Rdpre { get; init; }
