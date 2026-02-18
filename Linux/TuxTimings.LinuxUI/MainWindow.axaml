@@ -3,15 +3,15 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         x:Class="TuxTimings.LinuxUI.MainWindow"
-        Width="900" Height="840"
+        Width="900" Height="860"
         MinWidth="900" MaxWidth="900"
-        MinHeight="840" MaxHeight="840"
+        MinHeight="860" MaxHeight="860"
         CanResize="False"
         Title="TuxTimings"
         Background="#0D1117"
         FontFamily="Segoe UI, Liberation Sans, DejaVu Sans, sans-serif"
         FontSize="13">
-  <Grid RowDefinitions="Auto,Auto,*,Auto" Margin="10,10,10,14">
+  <Grid RowDefinitions="Auto,*" Margin="10,10,10,14">
     <!-- Header -->
     <Grid Grid.Row="0" Margin="0,0,0,12" RowDefinitions="Auto,Auto" ColumnDefinitions="*,Auto">
       <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding Summary.Cpu.DisplayName}" Classes="header-title" VerticalAlignment="Center"/>
@@ -42,8 +42,11 @@
       </StackPanel>
     </Grid>
 
-    <!-- Top row: DIMM speed | DIMM details | SPD temps | Temp & fans -->
-    <Grid Grid.Row="1" ColumnDefinitions="*,*,*,*" Margin="0,0,0,12">
+    <TabControl Grid.Row="1" Margin="0,8,0,0" Background="Transparent" BorderThickness="0">
+      <TabItem Header="RAM">
+        <Grid RowDefinitions="Auto,*,Auto">
+          <!-- Top row: DIMM speed/specs | DIMM details | Voltages -->
+          <Grid Grid.Row="0" ColumnDefinitions="*,*,*" Margin="0,0,0,12">
       <!-- DIMM speeds / clocks -->
       <Border Grid.Column="0" Classes="section" Margin="0,0,2,0">
         <StackPanel Spacing="6">
@@ -64,6 +67,8 @@
           <TextBlock Text="{Binding Summary.DramTimings.GdmEnabled, StringFormat=\{0\}}" Classes="value-highlight"/>
           <TextBlock Text="PowerDown" Classes="label" Margin="0,4,0,0"/>
           <TextBlock Text="{Binding Summary.DramTimings.PowerDownEnabled, StringFormat=\{0\}}" Classes="value-highlight"/>
+          <TextBlock Text="Temp" Classes="label" Margin="0,4,0,0"/>
+          <TextBlock Text="{Binding SelectedSpdTempDisplay}" Classes="value-highlight"/>
         </StackPanel>
       </Border>
 
@@ -86,39 +91,41 @@
         </StackPanel>
       </Border>
 
-      <!-- SPD temps -->
-      <Border Grid.Column="2" Classes="section" Margin="2,0">
-        <StackPanel Spacing="6">
-          <TextBlock Text="SPD" Classes="section-title" Margin="0,0,0,4"/>
-          <TextBlock Text="DIMM:" Classes="label" Margin="0,0,0,2"/>
-          <TextBlock Text="{Binding SelectedSpdTempDisplay}" Classes="value-highlight" Margin="0,0,0,2"/>
+      <!-- Voltages -->
+      <Border Grid.Column="2" Classes="section" Margin="2,0,0,0">
+        <StackPanel Spacing="2">
+          <TextBlock Text="Voltages" Classes="section-title" Margin="0,0,0,8"/>
+          <Grid ColumnDefinitions="100,*"
+                RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
+            <TextBlock Grid.Row="0" Grid.Column="0" Text="VSOC" Classes="label"/>
+            <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding Summary.Metrics.Vsoc, StringFormat=\{0:F4\}V}" Classes="value-highlight"/>
+            <TextBlock Grid.Row="1" Grid.Column="0" Text="CLDO VDDP" Classes="label"/>
+            <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding Summary.Metrics.Vddp, StringFormat=\{0:F4\}V}" Classes="value-highlight"/>
+            <TextBlock Grid.Row="2" Grid.Column="0" Text="VDDG CCD" Classes="label"/>
+            <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding Summary.Metrics.VddgCcd, StringFormat=\{0:F4\}V}" Classes="value-highlight"/>
+            <TextBlock Grid.Row="3" Grid.Column="0" Text="VDDG IOD" Classes="label"/>
+            <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding Summary.Metrics.VddgIod, StringFormat=\{0:F4\}V}" Classes="value-highlight"/>
+            <TextBlock Grid.Row="4" Grid.Column="0" Text="VDD MISC" Classes="label"/>
+            <TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding Summary.Metrics.VddMisc, StringFormat=\{0:F4\}V}" Classes="value-highlight"/>
+            <TextBlock Grid.Row="5" Grid.Column="0" Text="MEM VDD" Classes="label"/>
+            <TextBlock Grid.Row="5" Grid.Column="1" Text="{Binding Summary.Metrics.MemVdd, StringFormat=\{0:F4\}V}" Classes="value-highlight"/>
+            <TextBlock Grid.Row="6" Grid.Column="0" Text="MEM VDDQ" Classes="label"/>
+            <TextBlock Grid.Row="6" Grid.Column="1" Text="{Binding Summary.Metrics.MemVddq, StringFormat=\{0:F4\}V}" Classes="value-highlight"/>
+            <TextBlock Grid.Row="7" Grid.Column="0" Text="CPU VDDIO" Classes="label"/>
+            <TextBlock Grid.Row="7" Grid.Column="1" Text="{Binding Summary.Metrics.CpuVddio, StringFormat=\{0:F4\}V}" Classes="value-highlight"/>
+            <TextBlock Grid.Row="8" Grid.Column="0" Text="MEM VPP" Classes="label"/>
+            <TextBlock Grid.Row="8" Grid.Column="1" Text="{Binding Summary.Metrics.MemVpp, StringFormat=\{0:F4\}V}" Classes="value-highlight"/>
+            <TextBlock Grid.Row="9" Grid.Column="0" Text="VCORE" Classes="label" Margin="0,10,0,0"/>
+            <TextBlock Grid.Row="9" Grid.Column="1" Text="{Binding Summary.Metrics.Vcore, StringFormat=\{0:F4\}V}" Classes="value-highlight" Margin="0,10,0,0"/>
+            <TextBlock Grid.Row="10" Grid.Column="0" Text="PPT" Classes="label"/>
+            <TextBlock Grid.Row="10" Grid.Column="1" Text="{Binding Summary.Metrics.CpuPptWatts, StringFormat=\{0:F1\}W}" Classes="value-highlight"/>
+          </Grid>
         </StackPanel>
       </Border>
+          </Grid>
 
-      <!-- Temp & Fans -->
-      <Border Grid.Column="3" Classes="section" Margin="2,0,0,0">
-        <StackPanel Spacing="4">
-          <TextBlock Text="Temp &amp; Fans" Classes="section-title" Margin="0,0,0,4"/>
-          <TextBlock Text="Core temps / load / freq:" Classes="label" Margin="0,0,0,2"/>
-          <TextBlock Text="{Binding CoreTempsDisplay}" Classes="value-highlight" TextWrapping="Wrap" Margin="0,0,0,2"/>
-          <TextBlock Text="CCD1 / Die temp:" Classes="label" Margin="0,0,0,2"/>
-          <TextBlock Text="{Binding TctlTccdDisplay}" Classes="value-highlight" TextWrapping="Wrap"/>
-          <TextBlock Text="Fans:" Classes="label" Margin="0,0,0,2"/>
-          <ItemsControl ItemsSource="{Binding FanDisplayLines}" Margin="0,0,0,2">
-            <ItemsControl.ItemTemplate>
-              <DataTemplate>
-                <TextBlock Text="{Binding}" Classes="value-highlight" Margin="0,1,0,0"/>
-              </DataTemplate>
-            </ItemsControl.ItemTemplate>
-          </ItemsControl>
-          <TextBlock Text="Pump:" Classes="label" Margin="0,2,0,2"/>
-          <TextBlock Text="{Binding PumpDisplay}" Classes="value-highlight"/>
-        </StackPanel>
-      </Border>
-    </Grid>
-
-    <!-- Main: Primary | Secondary | Tertiary Timings | Voltages -->
-    <Grid Grid.Row="2" ColumnDefinitions="*,*,*,*" RowDefinitions="*">
+          <!-- Main: Primary | Secondary | Tertiary Timings -->
+          <Grid Grid.Row="1" ColumnDefinitions="*,*,*" RowDefinitions="*">
       <!-- Primary timings -->
       <Border Grid.Column="0" Classes="section" Margin="0,0,4,0">
         <ScrollViewer VerticalScrollBarVisibility="Hidden" HorizontalScrollBarVisibility="Hidden">
@@ -241,44 +248,49 @@
         </ScrollViewer>
       </Border>
 
-      <!-- Voltages -->
-      <Border Grid.Column="3" Classes="section" Margin="4,0,0,0">
-        <StackPanel Spacing="2">
-          <TextBlock Text="Voltages" Classes="section-title" Margin="0,0,0,8"/>
-          <Grid ColumnDefinitions="100,*"
-                RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
-            <TextBlock Grid.Row="0" Grid.Column="0" Text="VSOC" Classes="label"/>
-            <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding Summary.Metrics.Vsoc, StringFormat=\{0:F4\}V}" Classes="value-highlight"/>
-            <TextBlock Grid.Row="1" Grid.Column="0" Text="CLDO VDDP" Classes="label"/>
-            <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding Summary.Metrics.Vddp, StringFormat=\{0:F4\}V}" Classes="value-highlight"/>
-            <TextBlock Grid.Row="2" Grid.Column="0" Text="VDDG CCD" Classes="label"/>
-            <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding Summary.Metrics.VddgCcd, StringFormat=\{0:F4\}V}" Classes="value-highlight"/>
-            <TextBlock Grid.Row="3" Grid.Column="0" Text="VDDG IOD" Classes="label"/>
-            <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding Summary.Metrics.VddgIod, StringFormat=\{0:F4\}V}" Classes="value-highlight"/>
-            <TextBlock Grid.Row="4" Grid.Column="0" Text="VDD MISC" Classes="label"/>
-            <TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding Summary.Metrics.VddMisc, StringFormat=\{0:F4\}V}" Classes="value-highlight"/>
-            <TextBlock Grid.Row="5" Grid.Column="0" Text="MEM VDD" Classes="label"/>
-            <TextBlock Grid.Row="5" Grid.Column="1" Text="{Binding Summary.Metrics.MemVdd, StringFormat=\{0:F4\}V}" Classes="value-highlight"/>
-            <TextBlock Grid.Row="6" Grid.Column="0" Text="MEM VDDQ" Classes="label"/>
-            <TextBlock Grid.Row="6" Grid.Column="1" Text="{Binding Summary.Metrics.MemVddq, StringFormat=\{0:F4\}V}" Classes="value-highlight"/>
-            <TextBlock Grid.Row="7" Grid.Column="0" Text="CPU VDDIO" Classes="label"/>
-            <TextBlock Grid.Row="7" Grid.Column="1" Text="{Binding Summary.Metrics.CpuVddio, StringFormat=\{0:F4\}V}" Classes="value-highlight"/>
-            <TextBlock Grid.Row="8" Grid.Column="0" Text="MEM VPP" Classes="label"/>
-            <TextBlock Grid.Row="8" Grid.Column="1" Text="{Binding Summary.Metrics.MemVpp, StringFormat=\{0:F4\}V}" Classes="value-highlight"/>
-            <TextBlock Grid.Row="9" Grid.Column="0" Text="VCORE" Classes="label" Margin="0,10,0,0"/>
-            <TextBlock Grid.Row="9" Grid.Column="1" Text="{Binding Summary.Metrics.Vcore, StringFormat=\{0:F4\}V}" Classes="value-highlight" Margin="0,10,0,0"/>
-            <TextBlock Grid.Row="10" Grid.Column="0" Text="PPT" Classes="label"/>
-            <TextBlock Grid.Row="10" Grid.Column="1" Text="{Binding Summary.Metrics.CpuPptWatts, StringFormat=\{0:F1\}W}" Classes="value-highlight"/>
           </Grid>
-        </StackPanel>
-      </Border>
-    </Grid>
 
-    <!-- Footer -->
-    <Grid Grid.Row="3" Grid.ColumnSpan="4" Margin="0,12,0,0" ColumnDefinitions="*,Auto">
-      <TextBlock Grid.Column="0" Classes="footer-muted" VerticalAlignment="Center"
-                 Text="DRAM timings &amp; MCLK/UCLK: SMN. Voltages &amp; FCLK: PM table."/>
-      <TextBlock Grid.Column="1" Text="DDR5" Classes="value-highlight" FontWeight="SemiBold" VerticalAlignment="Center"/>
-    </Grid>
+          <!-- Footer -->
+          <Grid Grid.Row="2" Grid.ColumnSpan="3" Margin="0,12,0,0" ColumnDefinitions="*,Auto">
+            <TextBlock Grid.Column="0" Classes="footer-muted" VerticalAlignment="Center"
+                       Text="DRAM timings &amp; MCLK/UCLK: SMN. Voltages &amp; FCLK: PM table."/>
+            <TextBlock Grid.Column="1" Text="DDR5" Classes="value-highlight" FontWeight="SemiBold" VerticalAlignment="Center"/>
+          </Grid>
+        </Grid>
+      </TabItem>
+      <TabItem Header="CPU">
+        <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="0,8,0,0">
+          <Grid ColumnDefinitions="*,*" Margin="0,0,0,0">
+            <Border Grid.Column="0" Classes="section" Padding="12" Margin="0,0,6,0">
+              <StackPanel Spacing="6">
+                <TextBlock Text="VID &amp; per-core voltage" Classes="section-title" Margin="0,0,0,4"/>
+                <TextBlock Text="{Binding CoreVoltageVidDisplay}" Classes="value-highlight" TextWrapping="Wrap"/>
+              </StackPanel>
+            </Border>
+            <Border Grid.Column="1" Classes="section" Padding="12" Margin="6,0,0,0">
+              <StackPanel Spacing="4">
+                <TextBlock Text="Temp &amp; Fans" Classes="section-title" Margin="0,0,0,4"/>
+                <TextBlock Text="Core temps / load / freq:" Classes="label" Margin="0,0,0,2"/>
+                <TextBlock Text="{Binding CoreTempsDisplay}" Classes="value-highlight" TextWrapping="Wrap" Margin="0,0,0,2"/>
+                <TextBlock Text="CCD1 / Die temp:" Classes="label" Margin="0,0,0,2"/>
+                <TextBlock Text="{Binding TctlTccdDisplay}" Classes="value-highlight" TextWrapping="Wrap"/>
+                <TextBlock Text="IOD Hotspot:" Classes="label" Margin="0,8,0,2"/>
+                <TextBlock Text="{Binding IodHotspotDisplay}" Classes="value-highlight"/>
+                <TextBlock Text="Fans:" Classes="label" Margin="0,0,0,2"/>
+                <ItemsControl ItemsSource="{Binding FanDisplayLines}" Margin="0,0,0,2">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <TextBlock Text="{Binding}" Classes="value-highlight" Margin="0,1,0,0"/>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <TextBlock Text="Pump:" Classes="label" Margin="0,2,0,2"/>
+                <TextBlock Text="{Binding PumpDisplay}" Classes="value-highlight"/>
+              </StackPanel>
+            </Border>
+          </Grid>
+        </ScrollViewer>
+      </TabItem>
+    </TabControl>
   </Grid>
 </Window>

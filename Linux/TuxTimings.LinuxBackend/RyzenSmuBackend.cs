@@ -19,6 +19,60 @@ public sealed class RyzenSmuBackend : IHardwareBackend
     private IReadOnlyList<MemoryModule>? _cachedModules;
     private (string ProcessorName, string PartNumbers, string MotherboardProductName, string BiosVersion, string BiosReleaseDate)? _cachedDmidecode;
     private string? _cachedAgesaVersion;
+    private string? _lastPmTableCoreTempCheckLine;
+
+    /// <summary>
+    /// Try to derive BCLK (bus speed) in MHz from AMD P-state MSR (PSTATE_0) and a measured core clock.
+    /// Mirrors libcpuid's Zen-family logic: CoreCOF = (CpuFid / CpuDfsId) * 200 MHz → multiplier = (CpuFid / CpuDfsId) * 2.
+    /// We then compute BCLK ≈ coreClockMHz / multiplier. Returns 0 when unavailable or implausible.
+    /// </summary>
+    private static float TryReadBclkFromMsr(float currentCoreClockMHz)
+    {
+        try
+        {
+            // Use existing cpufreq helper if no core clock was passed in.
+            if (currentCoreClockMHz <= 0)
+                currentCoreClockMHz = TryReadCpufreqMHz();
+            if (currentCoreClockMHz <= 0)
+                return 0f;
+
+            const string msrPath = "/dev/cpu/0/msr";
+            if (!File.Exists(msrPath))
+                return 0f;
+
+            using var fs = new FileStream(msrPath, FileMode.Open, FileAccess.Read);
+            // AMD PSTATE_0 MSR = 0xC001_0064
+            const long pstate0 = 0xC0010064;
+            if (!fs.CanSeek || fs.Length < pstate0 + 8)
+                return 0f;
+
+            fs.Seek(pstate0, SeekOrigin.Begin);
+            Span<byte> buf = stackalloc byte[8];
+            int read = fs.Read(buf);
+            if (read != 8)
+                return 0f;
+
+            ulong msr = BitConverter.ToUInt64(buf);
+            // For Zen (family 0x17/0x18/0x19) P-state:
+            // bits 13:8 = CpuDfsId (divisor), bits 7:0 = CpuFid (multiplier numerator)
+            uint cpuDfsId = (uint)((msr >> 8) & 0x3Fu);
+            uint cpuFid = (uint)(msr & 0xFFu);
+            if (cpuDfsId == 0 || cpuFid == 0)
+                return 0f;
+
+            double multiplier = (cpuFid / (double)cpuDfsId) * 2.0;
+            if (multiplier <= 0.1 || multiplier > 100.0)
+                return 0f;
+
+            var bclk = (float)(currentCoreClockMHz / multiplier);
+            // Only accept plausible reference clocks (e.g. 90–110 MHz).
+            return (bclk >= 90f && bclk <= 110f) ? bclk : 0f;
+        }
+        catch
+        {
+            return 0f;
+        }
+    }
 
     /// <summary>
     /// Fallback: use Python script (same logic as dump_pm_voltages.py) to parse PM table.
@@ -77,10 +131,32 @@ public sealed class RyzenSmuBackend : IHardwareBackend
 
             if (values.Count == 0) return null;
 
-            // This Python fallback is only used when direct PM-table parsing fails.
-            // We currently only surface aggregate clocks/voltages/temps here.
+            // Core temps from script (PM table indices 317-324: CORE_TEMP_0 .. CORE_TEMP_7)
+            var coreTempsArr = new float[8];
+            for (int i = 0; i < 8; i++)
+            {
+                if (values.TryGetValue($"CORE_TEMP_{i}", out var t) && t >= 0f && t <= 150f)
+                    coreTempsArr[i] = t;
+            }
+
+            // VID and per-core voltage from script
+            float vid = values.GetValueOrDefault("VID");
+            var coreVoltagesArr = new float[8];
+            for (int i = 0; i < 8; i++)
+            {
+                if (values.TryGetValue($"CORE_VOLTAGE_{i}", out var v) && v >= 0f && v <= 2f)
+                    coreVoltagesArr[i] = v;
+            }
+
+            float? iodHotspot = null;
+            if (values.TryGetValue("IOD_HOTSPOT", out var ih) && ih >= 1f && ih <= 150f)
+                iodHotspot = ih;
+
+            var coreClock = values.GetValueOrDefault("CORE_MHZ");
+            var bclk = TryReadBclkFromMsr(coreClock);
             return new SmuMetrics
             {
+                BclkMHz = bclk,
                 FclkMHz = values.GetValueOrDefault("FCLK"),
                 UclkMHz = values.GetValueOrDefault("UCLK"),
                 MclkMHz = values.GetValueOrDefault("MCLK"),
@@ -94,13 +170,15 @@ public sealed class RyzenSmuBackend : IHardwareBackend
                 CpuPptWatts = values.GetValueOrDefault("PPT"),
                 CpuPackageCurrentAmps = values.GetValueOrDefault("CURRENT"),
                 CpuTempCelsius = values.GetValueOrDefault("TEMP"),
-                CoreTempsCelsius = Array.Empty<float>(),
+                CoreTempsCelsius = coreTempsArr,
+                Vid = vid,
+                CoreVoltages = coreVoltagesArr,
                 CoreClockMHz = values.GetValueOrDefault("CORE_MHZ"),
-                // Tdie/Tctl/Tccd will be overlaid later from k10temp/zenpower.
                 TdieCelsius = null,
                 TctlCelsius = null,
                 Tccd1Celsius = null,
-                Tccd2Celsius = null
+                Tccd2Celsius = null,
+                IodHotspotCelsius = iodHotspot
             };
         }
         catch
@@ -262,7 +340,8 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
             Modules = _cachedModules,
             Metrics = metrics,
             DramTimings = dramTimings,
-            Fans = fans
+            Fans = fans,
+            PmTableCoreTempCheckLine = _lastPmTableCoreTempCheckLine
         };
     }
 
@@ -615,6 +694,7 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
 
         if (!File.Exists(pmTablePath))
         {
+            _lastPmTableCoreTempCheckLine = null;
             if (!_hasDumpedDiagnostic)
             {
                 DumpDiagnostic("pm_table file does not exist", codenameIndex);
@@ -630,6 +710,7 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
                 byte[] bytes = File.ReadAllBytes(pmTablePath);
                 if (bytes.Length < 4)
                 {
+                    _lastPmTableCoreTempCheckLine = null;
                     metrics = new SmuMetrics();
                 }
                 else
@@ -637,6 +718,8 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
                     var count = bytes.Length / 4;
                     var floats = new float[count];
                     Buffer.BlockCopy(bytes, 0, floats, 0, bytes.Length);
+
+                    _lastPmTableCoreTempCheckLine = FormatPmTableCoreTempCheckLine(floats);
 
                     SmuMetrics baseMetrics;
 
@@ -677,7 +760,7 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
                         if (coreClock == 0 && count > 2) { float v = floats[2]; if (v >= 0.5f && v <= 6.5f) coreClock = v * 1000f; else if (v >= 500f && v <= 6500f) coreClock = v; }
                         if (coreClock == 0) coreClock = TryReadCpufreqMHz();
 
-                        var (pptW, coreTemps, tdieC, coreClocksGhz) = ReadKnownPmIndices(floats);
+                        var (pptW, coreTemps, tdieC, coreClocksGhz, vid, coreVoltages, iodHotspot) = ReadKnownPmIndices(floats);
                         if (coreClocksGhz.Length > 0)
                         {
                             float maxGhz = coreClocksGhz[0];
@@ -688,8 +771,10 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
                         if (tdieC > 0) cpuTemp = tdieC;
                         else if (cpuTemp == 0) cpuTemp = TryPlausibleTemp(floats);
 
+                        var bclk = TryReadBclkFromMsr(coreClock);
                         baseMetrics = new SmuMetrics
                         {
+                            BclkMHz = bclk,
                             CpuPackagePowerWatts = cpuPower,
                             CpuPptWatts = pptW,
                             CpuPackageCurrentAmps = packageCurrent,
@@ -699,16 +784,20 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
                             CoreClockMHz = coreClock,
                             CoreClocksGhz = coreClocksGhz,
                             MemoryClockMHz = memClock,
-                            // Tdie from PM table if available.
+                            Vid = vid,
+                            CoreVoltages = coreVoltages,
                             TdieCelsius = tdieC > 0 ? tdieC : null,
                             TctlCelsius = null,
                             Tccd1Celsius = null,
-                            Tccd2Celsius = null
+                            Tccd2Celsius = null,
+                            IodHotspotCelsius = iodHotspot
                         };
                     }
 
                     // Overlay with zenpower3 hwmon values if available.
                     metrics = ApplyZenpowerOverrides(baseMetrics);
+                    // Per-core temps from hwmon "Core N" labels (e.g. coretemp / psensors) using our core indices.
+                    metrics = ApplyPerCoreTempsFromHwmonOverlay(metrics);
                     // If PM table did not provide per-core temps, use k10temp CCD temps (temp3–temp10 = Tccd1–Tccd8).
                     metrics = ApplyK10TempCoreTempFallback(metrics);
                     // Tctl, Tccd1, Tccd2 from k10temp (temp1, temp3, temp4); Tccd2 only when exposed.
@@ -735,7 +824,14 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
                     var pyMetrics = TryReadPmTableViaPython();
                     if (pyMetrics is { } m && (m.FclkMHz > 0 || m.Vsoc > 0))
                     {
+                        if (m.CoreTempsCelsius is { Count: 8 } ct)
+                        {
+                            var parts = new string[8];
+                            for (int i = 0; i < 8; i++) parts[i] = ct[i].ToString("F1");
+                            _lastPmTableCoreTempCheckLine = "PM 317-324 (script): " + string.Join(", ", parts);
+                        }
                         metrics = ApplyZenpowerOverrides(m);
+                        metrics = ApplyPerCoreTempsFromHwmonOverlay(metrics);
                         metrics = ApplyK10TempCoreTempFallback(metrics);
                         metrics = ApplyK10TempTctlTccdOverlay(metrics);
                     }
@@ -940,7 +1036,7 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
         float coreClock = TryPlausibleCoreClock(pt);
         if (coreClock == 0) coreClock = TryReadCpufreqMHz();
 
-        var (pptW, coreTemps, tdieC, coreClocksGhz) = ReadKnownPmIndices(pt);
+        var (pptW, coreTemps, tdieC, coreClocksGhz, vid, coreVoltages, iodHotspot) = ReadKnownPmIndices(pt);
         if (coreClocksGhz.Length > 0)
         {
             float maxGhz = coreClocksGhz[0];
@@ -950,8 +1046,10 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
         }
 
         float cpuTemp = tdieC > 0 ? tdieC : TryPlausibleTemp(pt);
+        float bclk = TryReadBclkFromMsr(coreClock);
         return new SmuMetrics
         {
+            BclkMHz = bclk,
             CpuPackagePowerWatts = packagePower,
             CpuPptWatts = pptW,
             CpuPackageCurrentAmps = packageCurrent,
@@ -968,11 +1066,13 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
             VddgIod = vddgIod,
             VddgCcd = vddgCcd,
             VddMisc = vddMisc,
-            // Tdie will be overlaid later from PM table (ReadKnownPmIndices) or zenpower/k10temp.
+            Vid = vid,
+            CoreVoltages = coreVoltages,
             TdieCelsius = null,
             TctlCelsius = null,
             Tccd1Celsius = null,
-            Tccd2Celsius = null
+            Tccd2Celsius = null,
+            IodHotspotCelsius = iodHotspot
         };
     }
 
@@ -993,8 +1093,30 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
         return 0;
     }
 
-    /// <summary>Read known PM table indices: 3/26 = CPU PPT (W), 317–324 = core temps (°C), 448/449 = tdie (°C), 325–340 = core clocks (GHz).</summary>
-    private static (float PptWatts, float[] CoreTemps, float TdieCelsius, float[] CoreClocksGhz) ReadKnownPmIndices(float[] pt)
+    /// <summary>True when the PM table has per-core temp indices (317–324) and at least one value is in plausible range (5–120 °C).</summary>
+    private static bool HasPmTableCoreTempIndices(float[]? pt)
+    {
+        if (pt == null || pt.Length <= 324) return false;
+        for (int i = 0; i < 8; i++)
+        {
+            float t = pt[317 + i];
+            if (t >= 5f && t <= 120f) return true;
+        }
+        return false;
+    }
+
+    /// <summary>One-liner for debugging: "PM 317-324: 31.0, 30.5, …" from the given PM table floats.</summary>
+    private static string? FormatPmTableCoreTempCheckLine(float[]? pt)
+    {
+        if (pt == null || pt.Length <= 324) return null;
+        var parts = new string[8];
+        for (int i = 0; i < 8; i++)
+            parts[i] = pt[317 + i].ToString("F1");
+        return "PM 317-324: " + string.Join(", ", parts);
+    }
+
+    /// <summary>Read known PM table indices: 3/26 = PPT, 11 = IOD hotspot °C, 275 = VID, 309–316 = per-core voltage, 317–324 = core temps, 325–340 = core clocks, 448/449 = tdie.</summary>
+    private static (float PptWatts, float[] CoreTemps, float TdieCelsius, float[] CoreClocksGhz, float Vid, float[] CoreVoltages, float? IodHotspotCelsius) ReadKnownPmIndices(float[] pt)
     {
         float ppt = 0;
         if (pt != null && pt.Length > 26)
@@ -1029,7 +1151,26 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
                 coreClocksGhz[i] = pt[325 + i];
         }
 
-        return (ppt, coreTemps, tdie, coreClocksGhz);
+        float vid = 0;
+        if (pt != null && pt.Length > 275)
+            vid = pt[275];
+
+        float[] coreVoltages = Array.Empty<float>();
+        if (pt != null && pt.Length > 316)
+        {
+            coreVoltages = new float[8];
+            for (int i = 0; i < 8; i++)
+                coreVoltages[i] = pt[309 + i];
+        }
+
+        float? iodHotspot = null;
+        if (pt != null && pt.Length > 11)
+        {
+            float v = pt[11];
+            if (v >= 1f && v <= 150f) iodHotspot = v;
+        }
+
+        return (ppt, coreTemps, tdie, coreClocksGhz, vid, coreVoltages, iodHotspot);
     }
 
     /// <summary>Try candidate float indices for package power (W). Plausible: 0.5–400 W.</summary>
@@ -1112,6 +1253,7 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
             CoreClockMHz = metrics.CoreClockMHz,
             CoreClocksGhz = metrics.CoreClocksGhz,
             MemoryClockMHz = metrics.MemoryClockMHz,
+            BclkMHz = metrics.BclkMHz,
             FclkMHz = metrics.FclkMHz,
             UclkMHz = metrics.UclkMHz,
             MclkMHz = metrics.MclkMHz,
@@ -1124,7 +1266,10 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
             MemVdd = metrics.MemVdd,
             MemVddq = metrics.MemVddq,
             MemVpp = metrics.MemVpp,
-            SpdTempsCelsius = metrics.SpdTempsCelsius
+            SpdTempsCelsius = metrics.SpdTempsCelsius,
+            Vid = metrics.Vid,
+            CoreVoltages = metrics.CoreVoltages,
+            IodHotspotCelsius = metrics.IodHotspotCelsius
         };
     }
 
@@ -1545,6 +1690,7 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
                 CoreClockMHz = metrics.CoreClockMHz,
                 CoreClocksGhz = metrics.CoreClocksGhz,
                 MemoryClockMHz = metrics.MemoryClockMHz,
+            BclkMHz = metrics.BclkMHz,
                 FclkMHz = metrics.FclkMHz,
                 UclkMHz = metrics.UclkMHz,
                 MclkMHz = metrics.MclkMHz,
@@ -1556,7 +1702,10 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
                 CpuVddio = cpuVddio,
                 MemVdd = memVdd,
                 MemVddq = memVddq,
-                MemVpp = memVpp
+                MemVpp = memVpp,
+                Vid = metrics.Vid,
+                CoreVoltages = metrics.CoreVoltages,
+                IodHotspotCelsius = metrics.IodHotspotCelsius
             };
         }
         catch
@@ -1620,57 +1769,58 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
     }
 
     /// <summary>
-    /// If PM table core temps are empty or all zero, build per-core temps from CCD-level
-    /// sensors (k10temp / zenpower). Since Linux doesn't expose actual per-core temps on
-    /// AMD Zen, we broadcast each CCD's temperature to all cores on that CCD.
+    /// Read per-core temperatures from hwmon devices that expose "Core N" labels (e.g. coretemp on Intel).
+    /// Returns a dictionary: core index (from label) -> temperature in °C. Empty if none found.
+    /// Used to integrate psensors/lm-sensors-style per-core temps with our discovered physical core indices.
     /// </summary>
-    private static SmuMetrics ApplyK10TempCoreTempFallback(SmuMetrics metrics)
+    private static IReadOnlyDictionary<int, float> ReadPerCoreTempsFromHwmon()
     {
-        var fromPm = metrics.CoreTempsCelsius;
-        if (fromPm is { Count: > 0 })
-        {
-            var hasNonZero = false;
-            foreach (var t in fromPm)
-            {
-                if (t > 0f) { hasNonZero = true; break; }
-            }
-            if (hasNonZero) return metrics;
-        }
+        const string hwmonRoot = "/sys/class/hwmon";
+        if (!Directory.Exists(hwmonRoot)) return new Dictionary<int, float>();
 
-        // Determine physical core count from usage/freq arrays (set by ApplyProcStatCoreUsage later,
-        // but at this stage those haven't been applied yet). Use cpufreq to count physical cores.
+        var byCore = new Dictionary<int, float>();
+        foreach (var dir in Directory.GetDirectories(hwmonRoot))
+        {
+            if (!Directory.Exists(dir)) continue;
+            foreach (var f in Directory.EnumerateFiles(dir, "temp*_label"))
+            {
+                string? label = null;
+                try { label = File.ReadAllText(f).Trim(); } catch { continue; }
+                if (string.IsNullOrEmpty(label) || !label.StartsWith("Core ", StringComparison.OrdinalIgnoreCase))
+                    continue;
+                var numPart = label.Length > 5 ? label.Substring(5).Trim() : "";
+                if (string.IsNullOrEmpty(numPart) || !int.TryParse(numPart, out int coreIndex) || coreIndex < 0)
+                    continue;
+                var baseName = Path.GetFileNameWithoutExtension(f); // "temp2_label" -> "temp2"
+                var inputPath = Path.Combine(dir, baseName.Replace("_label", "_input"));
+                if (!File.Exists(inputPath)) continue;
+                if (!int.TryParse(File.ReadAllText(inputPath).Trim(), out var raw)) continue;
+                float celsius = raw / 1000f;
+                if (celsius >= 0f && celsius <= 150f)
+                    byCore[coreIndex] = celsius;
+            }
+        }
+        return byCore;
+    }
+
+    /// <summary>
+    /// When hwmon exposes per-core temps with "Core N" labels (e.g. coretemp), fill CoreTempsCelsius
+    /// using the same physical core indices we use for usage/frequency (core N = label "Core N").
+    /// Runs before k10temp fallback so real per-core data takes precedence over CCD broadcast.
+    /// </summary>
+    private static SmuMetrics ApplyPerCoreTempsFromHwmonOverlay(SmuMetrics metrics)
+    {
+        var byCore = ReadPerCoreTempsFromHwmon();
+        if (byCore.Count == 0) return metrics;
+
         int physicalCores = CountPhysicalCores();
-        if (physicalCores == 0) physicalCores = 8; // sensible default for Zen desktop
-
-        // Get CCD temps from k10temp (temp3=Tccd1..temp10=Tccd8).
-        var ccdTemps = ReadK10TempCcdOnly();
-        if (ccdTemps.Count == 0)
-        {
-            // Fall back: use Tccd1 from zenpower or metrics if available.
-            float? fallbackTemp = metrics.Tccd1Celsius;
-            if (!fallbackTemp.HasValue || fallbackTemp.Value <= 0)
-            {
-                // Try zenpower Tccd1 directly.
-                var raw = ReadK10TempCoreTemps();
-                // zenpower returns [Tdie, Tctl, Tccd1, ...] — take the last value as CCD temp.
-                if (raw.Count > 0) fallbackTemp = raw[^1];
-            }
-            if (fallbackTemp.HasValue && fallbackTemp.Value > 0)
-                ccdTemps = new[] { fallbackTemp.Value };
-        }
-
-        if (ccdTemps.Count == 0) return metrics;
-
-        // Broadcast CCD temps to all cores. Zen 5 desktop: 8 cores per CCD.
-        // If 2 CCDs: first half of cores = CCD1, second half = CCD2.
-        int coresPerCcd = ccdTemps.Count > 1 ? physicalCores / ccdTemps.Count : physicalCores;
+        if (physicalCores == 0) physicalCores = 16; // sensible default when cpufreq not available
         var perCore = new float[physicalCores];
-        for (int i = 0; i < physicalCores; i++)
+        foreach (var (idx, temp) in byCore)
         {
-            int ccdIdx = coresPerCcd > 0 ? Math.Min(i / coresPerCcd, ccdTemps.Count - 1) : 0;
-            perCore[i] = ccdTemps[ccdIdx];
+            if (idx < physicalCores)
+                perCore[idx] = temp;
         }
-
         return new SmuMetrics
         {
             CpuPackagePowerWatts = metrics.CpuPackagePowerWatts,
@@ -1686,6 +1836,7 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
             CoreClockMHz = metrics.CoreClockMHz,
             CoreClocksGhz = metrics.CoreClocksGhz,
             MemoryClockMHz = metrics.MemoryClockMHz,
+            BclkMHz = metrics.BclkMHz,
             FclkMHz = metrics.FclkMHz,
             UclkMHz = metrics.UclkMHz,
             MclkMHz = metrics.MclkMHz,
@@ -1693,12 +1844,26 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
             Vddp = metrics.Vddp,
             VddgCcd = metrics.VddgCcd,
             VddgIod = metrics.VddgIod,
-            VddMisc = metrics.VddMisc,
             CpuVddio = metrics.CpuVddio,
-            MemVdd = metrics.MemVdd,
-            MemVddq = metrics.MemVddq,
-            MemVpp = metrics.MemVpp
+            CoreUsagePercent = metrics.CoreUsagePercent,
+            SpdTempsCelsius = metrics.SpdTempsCelsius,
+            Vid = metrics.Vid,
+            CoreVoltages = metrics.CoreVoltages,
+            IodHotspotCelsius = metrics.IodHotspotCelsius
         };
+    }
+
+    /// <summary>
+    /// When PM table core temps are empty or all zero, we no longer broadcast CCD/Tdie to every core,
+    /// so we don't show the same die temp as "per-core" for each core. Per-core temps are only
+    /// filled from PM table indices 317–324 or from hwmon "Core N" (e.g. coretemp). Die/CCD temp
+    /// remains in TdieCelsius / Tccd1Celsius and is shown as "CCD1 / Die temp" in the UI.
+    /// </summary>
+    private static SmuMetrics ApplyK10TempCoreTempFallback(SmuMetrics metrics)
+    {
+        // Only keep existing per-core temps when they look real (from PM table or coretemp).
+        // Do not fill CoreTempsCelsius with broadcast CCD/Tdie — that was misleading (same value for every core).
+        return metrics;
     }
 
     /// <summary>Read only CCD-level temps from k10temp (temp3=Tccd1, temp4=Tccd2, ...).</summary>
@@ -1907,7 +2072,10 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
             CpuVddio = metrics.CpuVddio,
             MemVdd = metrics.MemVdd,
             MemVddq = metrics.MemVddq,
-            MemVpp = metrics.MemVpp
+            MemVpp = metrics.MemVpp,
+            Vid = metrics.Vid,
+            CoreVoltages = metrics.CoreVoltages,
+            IodHotspotCelsius = metrics.IodHotspotCelsius
         };
     }
 
@@ -1938,6 +2106,7 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
             CoreClockMHz = metrics.CoreClockMHz,
             CoreClocksGhz = metrics.CoreClocksGhz,
             MemoryClockMHz = metrics.MemoryClockMHz,
+            BclkMHz = metrics.BclkMHz,
             FclkMHz = metrics.FclkMHz,
             UclkMHz = metrics.UclkMHz,
             MclkMHz = metrics.MclkMHz,
@@ -1950,6 +2119,9 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
             MemVdd = metrics.MemVdd,
             MemVddq = metrics.MemVddq,
             MemVpp = metrics.MemVpp,
+            Vid = metrics.Vid,
+            CoreVoltages = metrics.CoreVoltages,
+            IodHotspotCelsius = metrics.IodHotspotCelsius,
             SpdTempsCelsius = temps
         };
     }
@@ -2152,6 +2324,9 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
             MemVdd = metrics.MemVdd,
             MemVddq = metrics.MemVddq,
             MemVpp = metrics.MemVpp,
+            Vid = metrics.Vid,
+            CoreVoltages = metrics.CoreVoltages,
+            IodHotspotCelsius = metrics.IodHotspotCelsius,
             SpdTempsCelsius = metrics.SpdTempsCelsius
         };
     }

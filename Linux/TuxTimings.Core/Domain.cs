@@ -140,10 +140,14 @@ public sealed class SmuMetrics
     public float? Tccd1Celsius { get; init; }
     /// <summary>Tccd2 from k10temp temp4_input (°C) or PM table. Null when unavailable.</summary>
     public float? Tccd2Celsius { get; init; }
+    /// <summary>IOD Hotspot temperature from PM table index 11 (°C). Null when unavailable.</summary>
+    public float? IodHotspotCelsius { get; init; }
     public float CoreClockMHz { get; init; }
     /// <summary>Per-core clocks in GHz from PM table (when exposed).</summary>
     public IReadOnlyList<float> CoreClocksGhz { get; init; } = Array.Empty<float>();
     public float MemoryClockMHz { get; init; }
+    /// <summary>BCLK / bus speed in MHz when available (from MSR-derived probing). 0 when unknown.</summary>
+    public float BclkMHz { get; init; }
     public float FclkMHz { get; init; }
     public float UclkMHz { get; init; }
     public float MclkMHz { get; init; }
@@ -158,6 +162,10 @@ public sealed class SmuMetrics
     public float MemVpp { get; init; }
     /// <summary>Per-SPD (DIMM) temperatures °C from spd5118 hwmon (temp1_input).</summary>
     public IReadOnlyList<float> SpdTempsCelsius { get; init; } = Array.Empty<float>();
+    /// <summary>VID (V). 0 if unavailable.</summary>
+    public float Vid { get; init; }
+    /// <summary>Per-core voltage from PM table indices 309–316 (V).</summary>
+    public IReadOnlyList<float> CoreVoltages { get; init; } = Array.Empty<float>();
 }
 
 public sealed class DramTimingsModel
@@ -271,6 +279,8 @@ public sealed class SystemSummary
     public SmuMetrics Metrics { get; init; } = new();
     public DramTimingsModel DramTimings { get; init; } = new();
     public IReadOnlyList<FanReading> Fans { get; init; } = Array.Empty<FanReading>();
+    /// <summary>One-liner for debugging: "PM 317-324: 31.0, 30.5, …" when PM table was read.</summary>
+    public string? PmTableCoreTempCheckLine { get; init; }
 }
 
 public interface IHardwareBackend

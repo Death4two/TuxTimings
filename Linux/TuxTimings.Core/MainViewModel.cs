@@ -55,8 +55,40 @@ public sealed class MainViewModel : INotifyPropertyChanged
             OnPropertyChanged(nameof(FanDisplayLines));
             OnPropertyChanged(nameof(PumpDisplay));
             OnPropertyChanged(nameof(BclkMHz));
+            OnPropertyChanged(nameof(PmTableCoreTempCheckLine));
+            OnPropertyChanged(nameof(CoreVoltageVidDisplay));
+            OnPropertyChanged(nameof(IodHotspotDisplay));
         }
     }
+
+    /// <summary>Per-core voltage and VID for the "Per-core Voltage &amp; VID" tab: VID 271/275 and C0–C7 voltages.</summary>
+    public string CoreVoltageVidDisplay
+    {
+        get
+        {
+            var m = Summary?.Metrics;
+            if (m == null) return "—";
+            var parts = new List<string>();
+            if (m.Vid > 0f)
+            {
+                parts.Add($"VID: {m.Vid:F4} V");
+            }
+            var volts = m.CoreVoltages ?? Array.Empty<float>();
+            if (volts.Count > 0)
+            {
+                for (int i = 0; i < volts.Count; i++)
+                {
+                    if (volts[i] > 0f)
+                        parts.Add($"C{i}: {volts[i]:F4} V");
+                }
+            }
+            return parts.Count == 0 ? "—" : string.Join(Environment.NewLine, parts);
+        }
+    }
+
+    /// <summary>One-liner to check PM table core temp indices 317–324 (e.g. "PM 317-324: 31.0, 30.5, …").</summary>
+    public string? PmTableCoreTempCheckLine => Summary?.PmTableCoreTempCheckLine;
+
     /// <summary>Installed DIMMs from dmidecode -t 17 for dropdown.</summary>
     public IReadOnlyList<MemoryModule> Modules => _cachedModules;
 
@@ -172,11 +204,17 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
     }
 
-    /// <summary>BCLK in MHz. AM5 Ryzen uses 100 MHz reference clock; derive from FCLK when available.</summary>
+    /// <summary>BCLK in MHz. Prefer MSR/PM-derived value from backend; fall back to FCLK-derived 100 MHz heuristic.</summary>
     public float BclkMHz
     {
         get
         {
+            // 1) Prefer backend-provided BCLK (derived from MSR P-state when possible).
+            var fromBackend = Summary.Metrics.BclkMHz;
+            if (fromBackend > 0.1f)
+                return fromBackend;
+
+            // 2) Fallback: derive from FCLK as before.
             // BCLK = reference clock. For AM5 Ryzen, 100 MHz is the standard value.
             // If FCLK is available, derive BCLK = FCLK / round(FCLK/100) to detect BCLK OC.
             var fclk = Summary.Metrics.FclkMHz;
@@ -203,7 +241,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
     }
 
-    /// <summary>Per-core temps, usage, and frequency for UI: "C0:45°C (23% @ 4.50 GHz) …". Falls back gracefully when usage/freq missing.</summary>
+    /// <summary>Per-core temps, usage, and frequency for UI: "C0:45°C (23% @ 4.50 GHz) …". Falls back gracefully when usage/freq missing. Dual-CCD: show C0–C15 with usage/freq only, no per-core temp.</summary>
     public string CoreTempsDisplay
     {
         get
@@ -216,7 +254,12 @@ public sealed class MainViewModel : INotifyPropertyChanged
             var coreCount = Math.Max(Math.Max(temps.Count, usage.Count), freqsMhz.Count);
             if (coreCount == 0) return "—";
 
-            bool showTemps = IsPerCoreTempsSupportedCpu;
+            // Dual-CCD: show up to 16 cores (C0–C15), do not supply per-core temperature.
+            bool dualCcd = coreCount >= 12;
+            if (dualCcd) coreCount = Math.Min(coreCount, 16);
+
+            // Show per-core temps only when we have data and not dual-CCD (dual-CCD uses CCD/die temps only).
+            bool showTemps = !dualCcd && ((temps.Count > 0) || IsPerCoreTempsSupportedCpu);
 
             var parts = new List<string>(coreCount);
             for (int i = 0; i < coreCount; i++)
@@ -301,6 +344,16 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
             if (m.Tccd2Celsius.HasValue) parts.Add($"CCD2:{m.Tccd2Celsius.Value:F0}");
             return string.Join("  ", parts) + " °C";
+        }
+    }
+
+    /// <summary>IOD Hotspot temperature from PM table index 11 (°C). "—" when unavailable.</summary>
+    public string IodHotspotDisplay
+    {
+        get
+        {
+            var v = Summary?.Metrics?.IodHotspotCelsius;
+            return v.HasValue && v.Value > 0 ? $"{v.Value:F0} °C" : "—";
         }
     }
 
