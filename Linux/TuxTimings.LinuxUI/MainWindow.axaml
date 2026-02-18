@@ -132,35 +132,37 @@
           <StackPanel Spacing="2">
             <TextBlock Text="Primary Timings" Classes="section-title" Margin="0,0,0,8"/>
             <Grid ColumnDefinitions="80,*"
-                  RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
+                  RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
               <TextBlock Grid.Row="0" Grid.Column="0" Text="tCL" Classes="label"/>
               <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding Summary.DramTimings.Tcl}" Classes="value-highlight"/>
-              <TextBlock Grid.Row="1" Grid.Column="0" Text="tRCD" Classes="label"/>
-              <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding Summary.DramTimings.Trcd}" Classes="value-highlight"/>
-              <TextBlock Grid.Row="2" Grid.Column="0" Text="tRP" Classes="label"/>
-              <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding Summary.DramTimings.Trp}" Classes="value-highlight"/>
-              <TextBlock Grid.Row="3" Grid.Column="0" Text="tRAS" Classes="label"/>
-              <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding Summary.DramTimings.Tras}" Classes="value-highlight"/>
-              <TextBlock Grid.Row="4" Grid.Column="0" Text="tRC" Classes="label"/>
-              <TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding Summary.DramTimings.Trc}" Classes="value-highlight"/>
-              <TextBlock Grid.Row="5" Grid.Column="0" Text="tRRDS" Classes="label"/>
-              <TextBlock Grid.Row="5" Grid.Column="1" Text="{Binding Summary.DramTimings.Trrds}" Classes="value-highlight"/>
-              <TextBlock Grid.Row="6" Grid.Column="0" Text="tRRDL" Classes="label"/>
-              <TextBlock Grid.Row="6" Grid.Column="1" Text="{Binding Summary.DramTimings.Trrdl}" Classes="value-highlight"/>
-              <TextBlock Grid.Row="7" Grid.Column="0" Text="tFAW" Classes="label"/>
-              <TextBlock Grid.Row="7" Grid.Column="1" Text="{Binding Summary.DramTimings.Tfaw}" Classes="value-highlight"/>
-              <TextBlock Grid.Row="8" Grid.Column="0" Text="tWR" Classes="label"/>
-              <TextBlock Grid.Row="8" Grid.Column="1" Text="{Binding Summary.DramTimings.Twr}" Classes="value-highlight"/>
-              <TextBlock Grid.Row="9" Grid.Column="0" Text="tCWL" Classes="label"/>
-              <TextBlock Grid.Row="9" Grid.Column="1" Text="{Binding Summary.DramTimings.Tcwl}" Classes="value-highlight"/>
-              <TextBlock Grid.Row="10" Grid.Column="0" Text="tRFC (ns)" Classes="label"/>
-              <TextBlock Grid.Row="10" Grid.Column="1" Text="{Binding Summary.DramTimings.TrfcNs, StringFormat=\{0:F2\}}" Classes="value-highlight"/>
-              <TextBlock Grid.Row="11" Grid.Column="0" Text="tRFC" Classes="label"/>
-              <TextBlock Grid.Row="11" Grid.Column="1" Text="{Binding Summary.DramTimings.Rfc}" Classes="value-highlight"/>
-              <TextBlock Grid.Row="12" Grid.Column="0" Text="tRFC2" Classes="label"/>
-              <TextBlock Grid.Row="12" Grid.Column="1" Text="{Binding Summary.DramTimings.Rfc2}" Classes="value-highlight"/>
-              <TextBlock Grid.Row="13" Grid.Column="0" Text="tRFCsb" Classes="label"/>
-              <TextBlock Grid.Row="13" Grid.Column="1" Text="{Binding Summary.DramTimings.Rfcsb}" Classes="value-highlight"/>
+              <TextBlock Grid.Row="1" Grid.Column="0" Text="tRCDRD" Classes="label"/>
+              <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding Summary.DramTimings.TrcdRd}" Classes="value-highlight"/>
+              <TextBlock Grid.Row="2" Grid.Column="0" Text="tRCDWR" Classes="label"/>
+              <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding Summary.DramTimings.TrcdWr}" Classes="value-highlight"/>
+              <TextBlock Grid.Row="3" Grid.Column="0" Text="tRP" Classes="label"/>
+              <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding Summary.DramTimings.Trp}" Classes="value-highlight"/>
+              <TextBlock Grid.Row="4" Grid.Column="0" Text="tRAS" Classes="label"/>
+              <TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding Summary.DramTimings.Tras}" Classes="value-highlight"/>
+              <TextBlock Grid.Row="5" Grid.Column="0" Text="tRC" Classes="label"/>
+              <TextBlock Grid.Row="5" Grid.Column="1" Text="{Binding Summary.DramTimings.Trc}" Classes="value-highlight"/>
+              <TextBlock Grid.Row="6" Grid.Column="0" Text="tRRDS" Classes="label"/>
+              <TextBlock Grid.Row="6" Grid.Column="1" Text="{Binding Summary.DramTimings.Trrds}" Classes="value-highlight"/>
+              <TextBlock Grid.Row="7" Grid.Column="0" Text="tRRDL" Classes="label"/>
+              <TextBlock Grid.Row="7" Grid.Column="1" Text="{Binding Summary.DramTimings.Trrdl}" Classes="value-highlight"/>
+              <TextBlock Grid.Row="8" Grid.Column="0" Text="tFAW" Classes="label"/>
+              <TextBlock Grid.Row="8" Grid.Column="1" Text="{Binding Summary.DramTimings.Tfaw}" Classes="value-highlight"/>
+              <TextBlock Grid.Row="9" Grid.Column="0" Text="tWR" Classes="label"/>
+              <TextBlock Grid.Row="9" Grid.Column="1" Text="{Binding Summary.DramTimings.Twr}" Classes="value-highlight"/>
+              <TextBlock Grid.Row="10" Grid.Column="0" Text="tCWL" Classes="label"/>
+              <TextBlock Grid.Row="10" Grid.Column="1" Text="{Binding Summary.DramTimings.Tcwl}" Classes="value-highlight"/>
+              <TextBlock Grid.Row="11" Grid.Column="0" Text="tRFC (ns)" Classes="label"/>
+              <TextBlock Grid.Row="11" Grid.Column="1" Text="{Binding Summary.DramTimings.TrfcNs, StringFormat=\{0:F2\}}" Classes="value-highlight"/>
+              <TextBlock Grid.Row="12" Grid.Column="0" Text="tRFC" Classes="label"/>
+              <TextBlock Grid.Row="12" Grid.Column="1" Text="{Binding Summary.DramTimings.Rfc}" Classes="value-highlight"/>
+              <TextBlock Grid.Row="13" Grid.Column="0" Text="tRFC2" Classes="label"/>
+              <TextBlock Grid.Row="13" Grid.Column="1" Text="{Binding Summary.DramTimings.Rfc2}" Classes="value-highlight"/>
+              <TextBlock Grid.Row="14" Grid.Column="0" Text="tRFCsb" Classes="label"/>
+              <TextBlock Grid.Row="14" Grid.Column="1" Text="{Binding Summary.DramTimings.Rfcsb}" Classes="value-highlight"/>
             </Grid>
           </StackPanel>
         </ScrollViewer>

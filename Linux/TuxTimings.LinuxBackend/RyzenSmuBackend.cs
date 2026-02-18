@@ -2559,7 +2559,9 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
             uint reg502A4 = ReadSmn(offset | 0x502A4);
 
             uint tcl = BitSlice(reg50204, 5, 0);
-            uint trcd = BitSlice(reg50204, 21, 16);
+            uint trcdRd = BitSlice(reg50204, 21, 16);
+            uint trcdWr = BitSlice(reg50204, 29, 24);
+            if (trcdWr == 0) trcdWr = trcdRd;
             uint tras = BitSlice(reg50204, 14, 8);
             uint trp = BitSlice(reg50208, 21, 16);
             uint trc = BitSlice(reg50208, 7, 0);
@@ -2664,7 +2666,9 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
             model = new DramTimingsModel
             {
                 Tcl = tcl,
-                Trcd = trcd,
+                Trcd = trcdRd,
+                TrcdRd = trcdRd,
+                TrcdWr = trcdWr,
                 Trp = trp,
                 Tras = tras,
                 Trc = trc,
