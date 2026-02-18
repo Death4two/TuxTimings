@@ -7,7 +7,7 @@ for each logical value on every supported CPU.
 
 Output keys are identical across all families for backend compatibility:
   FCLK, UCLK, MCLK, VSOC, VDDP, VDDG_IOD, VDDG_CCD, VDD_MISC, VCORE,
-  IOD_HOTSPOT, VID, CORE_VOLTAGE_0..N, CORE_TEMP_0..N
+  IOD_HOTSPOT, VID, PPT, POWER, CORE_VOLTAGE_0..N, CORE_TEMP_0..N
 """
 import struct
 import sys
@@ -21,6 +21,8 @@ PM_TABLE_VERSION_PATH = Path("/sys/kernel/ryzen_smu_drv/pm_table_version")
 #
 # "named"              – list of (pm_element_index, output_key)
 # "vid"                – pm_element index for VID (VID_LIMIT)
+# "ppt"                – pm_element index for PPT_VALUE (W) or PPT_VALUE slow on APU
+# "socket_power"       – pm_element index for SOCKET_POWER (W)
 # "core_voltage_start" – first pm_element index for consecutive CORE_VOLTAGE
 # "core_temp_start"    – first pm_element index for consecutive CORE_TEMP
 # "max_cores"          – how many cores this table version supports
@@ -41,6 +43,8 @@ GRANITE_RIDGE = {
         (271, "VCORE"),
     ],
     "vid": 275,
+    "ppt": 3,             # Granite Ridge: index 3 for CPU PPT
+    "socket_power": 29,
     "core_voltage_start": 309,
     "core_temp_start": 317,
     "max_cores": 8,
@@ -60,7 +64,9 @@ VERMEER_0x380804 = {  # 5900X / 5950X  16-core  (older BIOS, SMU ≤56.45)
         (139, "VDDG_CCD"),      # V_VDDG_CCD
         (40,  "VCORE"),         # CPU_SET_VOLTAGE
     ],
-    "vid": 10,                    # VID_LIMIT
+    "vid": 10,
+    "ppt": 1,
+    "socket_power": 29,
     "core_voltage_start": 185,
     "core_temp_start": 201,
     "max_cores": 16,
@@ -79,6 +85,8 @@ VERMEER_0x380805 = {  # 5900X / 5950X  16-core  (newer BIOS, SMU 56.50+)
         (39,  "VCORE"),         # shifted 40→39
     ],
     "vid": 10,
+    "ppt": 1,
+    "socket_power": 29,
     "core_voltage_start": 188,
     "core_temp_start": 204,
     "max_cores": 16,
@@ -97,6 +105,8 @@ VERMEER_0x380904 = {  # 5600X  8-core  (older BIOS)
         (40,  "VCORE"),
     ],
     "vid": 10,
+    "ppt": 1,
+    "socket_power": 29,
     "core_voltage_start": 177,
     "core_temp_start": 185,
     "max_cores": 8,
@@ -115,6 +125,8 @@ VERMEER_0x380905 = {  # 5600X  8-core  (newer BIOS)
         (39,  "VCORE"),
     ],
     "vid": 10,
+    "ppt": 1,
+    "socket_power": 29,
     "core_voltage_start": 180,
     "core_temp_start": 188,
     "max_cores": 8,
@@ -133,6 +145,8 @@ CEZANNE_0x400005 = {  # 5700G  8-core APU
         (98,  "VCORE"),         # CPU_SET_VOLTAGE
     ],
     "vid": 28,
+    "ppt": 5,             # PPT_VALUE (slow) on APU
+    "socket_power": 38,
     "core_voltage_start": 208,
     "core_temp_start": 216,
     "max_cores": 8,
@@ -152,6 +166,8 @@ MATISSE_0x240903 = {  # 3700X / 3800X  8-core
         (39,  "VCORE"),         # CPU_SET_VOLTAGE
     ],
     "vid": 10,
+    "ppt": 1,
+    "socket_power": 29,
     "core_voltage_start": 155,
     "core_temp_start": 163,
     "max_cores": 8,
@@ -169,6 +185,8 @@ MATISSE_0x240803 = {  # 3950X  16-core
         (40,  "VCORE"),
     ],
     "vid": 10,
+    "ppt": 1,
+    "socket_power": 29,
     "core_voltage_start": 163,
     "core_temp_start": 179,
     "max_cores": 16,
@@ -187,6 +205,8 @@ RENOIR_0x370003 = {  # 4800U etc.  8-core APU
         (97,  "VCORE"),
     ],
     "vid": 28,
+    "ppt": 5,
+    "socket_power": 38,
     "core_voltage_start": 200,
     "core_temp_start": 208,
     "max_cores": 8,
@@ -203,6 +223,8 @@ RENOIR_0x370005 = {  # Renoir v2  8-core APU
         (97,  "VCORE"),
     ],
     "vid": 28,
+    "ppt": 5,
+    "socket_power": 38,
     "core_voltage_start": 207,
     "core_temp_start": 215,
     "max_cores": 8,
@@ -221,6 +243,8 @@ RAVEN_0x1E0004 = {  # 2500U etc.  4-core APU
         (61,  "VCORE"),         # CPU_SET_VOLTAGE (same idx as VID_VALUE)
     ],
     "vid": 57,
+    "ppt": 5,
+    "socket_power": 38,
     "core_voltage_start": 104,
     "core_temp_start": 108,
     "max_cores": 4,
@@ -273,6 +297,17 @@ def main():
     vid_idx = mapping["vid"]
     if vid_idx < len(floats):
         print(f"VID={floats[vid_idx]}")
+
+    ppt_idx = mapping.get("ppt")
+    if ppt_idx is not None and ppt_idx < len(floats):
+        v = floats[ppt_idx]
+        if 0.5 <= v <= 400:
+            print(f"PPT={v}")
+    sock_idx = mapping.get("socket_power")
+    if sock_idx is not None and sock_idx < len(floats):
+        v = floats[sock_idx]
+        if 0.5 <= v <= 400:
+            print(f"POWER={v}")
 
     start = mapping["core_voltage_start"]
     for i in range(mapping["max_cores"]):

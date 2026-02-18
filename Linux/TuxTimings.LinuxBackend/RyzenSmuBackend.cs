@@ -311,9 +311,14 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
         var dramTimings = ReadDramTimingsForCodename(codenameIndex);
         var (memFreqMHz, memType) = GetMemoryConfigForCodename(codenameIndex, dramTimings);
 
+        // DDR4 generic reader does not set FrequencyHintMHz; use MCLK from PM table when available.
+        float memoryFreq = memFreqMHz;
+        if (memoryFreq == 0 && memType == MemType.DDR4 && metrics.MclkMHz > 0)
+            memoryFreq = metrics.MclkMHz;
+
         var memory = new MemoryConfigModel
         {
-            Frequency = memFreqMHz,
+            Frequency = memoryFreq,
             Type = memType,
             TotalCapacity = ReadTotalMemory(),
             PartNumber = partNumbers
@@ -1115,15 +1120,19 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
         return "PM 317-324: " + string.Join(", ", parts);
     }
 
-    /// <summary>Read known PM table indices: 3/26 = PPT, 11 = IOD hotspot °C, 275 = VID, 309–316 = per-core voltage, 317–324 = core temps, 325–340 = core clocks, 448/449 = tdie.</summary>
+    /// <summary>Read known PM table indices. PPT: try 3 (Granite Ridge), then 1 (PPT_VALUE desktop), 13 (PPT_ACTUAL), 29 (SOCKET_POWER desktop), 5 (PPT_VALUE APU), 38 (SOCKET_POWER APU). 11 = IOD hotspot °C, 275 = VID, etc.</summary>
     private static (float PptWatts, float[] CoreTemps, float TdieCelsius, float[] CoreClocksGhz, float Vid, float[] CoreVoltages, float? IodHotspotCelsius) ReadKnownPmIndices(float[] pt)
     {
         float ppt = 0;
-        if (pt != null && pt.Length > 26)
+        if (pt != null)
         {
-            float v3 = pt[3], v26 = pt[26];
-            if (v3 >= 1f && v3 <= 400f) ppt = v3;
-            else if (v26 >= 1f && v26 <= 400f) ppt = v26;
+            int[] pptCandidates = { 3, 1, 13, 29, 5, 38 }; // Granite Ridge PPT, then PPT_VALUE, PPT_ACTUAL, SOCKET_POWER (desktop), PPT slow, SOCKET (APU)
+            foreach (int i in pptCandidates)
+            {
+                if (i >= pt.Length) continue;
+                float v = pt[i];
+                if (v >= 0.5f && v <= 400f) { ppt = v; break; }
+            }
         }
 
         float[] coreTemps = Array.Empty<float>();
@@ -1173,11 +1182,11 @@ Check dmesg for 'Unknown PM table version' or 'Failed to probe the PM table'.
         return (ppt, coreTemps, tdie, coreClocksGhz, vid, coreVoltages, iodHotspot);
     }
 
-    /// <summary>Try candidate float indices for package power (W). Plausible: 0.5–400 W.</summary>
+    /// <summary>Try candidate float indices for package power (W). Plausible: 0.5–400 W. Order: SOCKET_POWER(29), PPT_VALUE(1), PPT_ACTUAL(13), APU SOCKET(38), PPT slow(5), then dumps.</summary>
     private static float TryPlausiblePower(float[] pt)
     {
         if (pt == null || pt.Length == 0) return 0;
-        int[] candidates = { 220, 187, 29, 42, 0, 1 }; // 220/187 from PM table dumps, then SOCKET_POWER, CPU_TELEMETRY_POWER, early
+        int[] candidates = { 29, 1, 13, 38, 5, 220, 187, 42, 0 }; // SOCKET_POWER, PPT_VALUE, PPT_ACTUAL (desktop); 38,5 (APU); then dumps, CPU_TELEMETRY_POWER, PPT_LIMIT
         foreach (var i in candidates)
         {
             if (i >= pt.Length) continue;
