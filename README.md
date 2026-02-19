@@ -25,3 +25,5 @@ This project is licensed under the **GNU General Public License v3.0**. See [LIC
 - **[AMD's public documentation](https://www.amd.com/en/support/tech-docs)** — SMN/PM table and DRAM timing references.
 - **[AppImageKit](https://github.com/AppImage/AppImageKit)** — Used to build the AppImage (see [Linux/README.md](Linux/README.md)).  
 - **Tux icon** — Tux the penguin originally by Larry Ewing, created with GIMP (`lewing@isc.tamu.edu`), used and/or modified under the terms of the original image permission.
+
+Huge credit goes to Zentimings and irusanov without his project this wouldn't be possible.
