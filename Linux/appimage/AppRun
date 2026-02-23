@@ -1,3 +1,28 @@
-#!/bin/sh
+#!/bin/bash
 HERE="$(dirname "$(readlink -f "$0")")"
-exec "$HERE/usr/bin/TuxTimings.LinuxUI" "$@"
+export LD_LIBRARY_PATH="$HERE/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+
+# If already root, just run directly
+if [ "$(id -u)" -eq 0 ]; then
+    exec "$HERE/usr/bin/tuxtimings" "$@"
+fi
+
+# Build --env-VAR=VALUE args for the binary to restore after pkexec
+ENV_ARGS=""
+for VAR in DISPLAY WAYLAND_DISPLAY XDG_RUNTIME_DIR XAUTHORITY \
+           DBUS_SESSION_BUS_ADDRESS XDG_CONFIG_HOME HOME; do
+    eval VAL=\$$VAR
+    [ -n "$VAL" ] && ENV_ARGS="$ENV_ARGS --env-$VAR=$VAL"
+done
+
+# If on Wayland, tell GTK4 to use it natively
+if [ -n "$WAYLAND_DISPLAY" ]; then
+    ENV_ARGS="$ENV_ARGS --env-GDK_BACKEND=wayland"
+fi
+
+# Use installed binary (matches polkit policy exec.path)
+if [ -x /opt/TuxTimings/bin/tuxtimings ]; then
+    exec pkexec /opt/TuxTimings/bin/tuxtimings $ENV_ARGS "$@"
+else
+    exec pkexec "$HERE/usr/bin/tuxtimings" $ENV_ARGS "$@"
+fi
