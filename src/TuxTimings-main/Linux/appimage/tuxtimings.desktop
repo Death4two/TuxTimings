@@ -1,8 +1,0 @@
-[Desktop Entry]
-Name=TuxTimings
-Comment=AMD Ryzen DRAM timings viewer
-Exec=/opt/TuxTimings/TuxTimings-x86_64.AppImage
-Icon=tuxtimings
-Terminal=false
-Type=Application
-Categories=Utility;

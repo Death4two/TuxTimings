@@ -19,4 +19,4 @@ Linux/TuxTimings.LinuxBackend/pm_tables.c
 *.tar.gz
 *.pkg.tar.zst
 pkg/
-src/tuxtimings-*/
+src/
