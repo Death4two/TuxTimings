@@ -1,4 +1,4 @@
-# TuxTimings
+<h1 align="center">TuxTimings</h1>
 
 ![TuxTimings](screenshot.png "TuxTimings")
 
