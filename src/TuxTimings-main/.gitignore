@@ -14,9 +14,3 @@ ZenStates-Core-src/
 Linux/docs/SVI2_SMN_sources.md
 Linux/scripts/watch_pm_table.py
 Linux/TuxTimings.LinuxBackend/pm_tables.c
-
-# makepkg build artifacts
-*.tar.gz
-*.pkg.tar.zst
-pkg/
-src/tuxtimings-*/

@@ -3,12 +3,10 @@
 *.a
 tuxtimings
 
-# Package build outputs
+# AppImage build outputs
 AppDir/
 *.AppImage
 appimagetool-*.AppImage
-deb-build/
-*.deb
 
 # .NET (legacy)
 publish/
