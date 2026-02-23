@@ -4,30 +4,34 @@
 
 ### Supported CPUs
 
-At the moment, **only Zen 5 Granite Ridge desktop CPUs** (e.g. Ryzen 9000‑series AM5) are fully supported for PM‑table based telemetry. Other AMD families may start, but sensors and timings are not guaranteed to be correct yet.
+Zen 5 Granite Ridge (Ryzen 9000-series AM5) is the primary tested target for PM-table based telemetry. Other AMD Zen families (Vermeer, Cezanne, Matisse, Renoir, Raven Ridge) have PM table mappings and may work with varying completeness.
 
 ### Prerequisites
 
-- **[ryzen_smu](https://github.com/amkillam/ryzen_smu/)** kernel module — build and load before running TuxTimings
-- **GTK4** development libraries (`gtk4-devel` / `libgtk-4-dev`)
-- **gcc**, **make**, **pkg-config**
+- **[ryzen_smu](https://github.com/amkillam/ryzen_smu/)** kernel module — required for all readings. Install before running TuxTimings.
+- **GTK4** runtime (`gtk4` / `libgtk-4-1`) — needed to run the application
+
+> If building manually: also install `gcc`, `make`, `pkg-config`, and GTK4 development headers (`gtk4-devel` / `libgtk-4-dev`). These are handled automatically by `makepkg`.
 
 ### Installing
 
-#### Arch Linux (recommended)
+#### Arch Linux / CachyOS (recommended)
+
+Install `ryzen_smu` first, then build and install TuxTimings:
 
 ```bash
+yay -S ryzen_smu-dkms-git
 makepkg -si
 ```
 
-This uses the included PKGBUILD to build and install via pacman. Uninstall with `sudo pacman -R tuxtimings`.
+This uses the included PKGBUILD to build and install via pacman. The `aod-voltages` kernel module (for memory voltage readings) is bundled and built automatically. Uninstall with `sudo pacman -R tuxtimings`.
 
 #### Ubuntu / Debian
 
 ```bash
 cd Linux
 ./install.sh --deb
-sudo dpkg -i tuxtimings_1.0.0_amd64.deb
+sudo dpkg -i tuxtimings_1.0.2_amd64.deb
 ```
 
 #### Any Linux (direct install)
@@ -72,4 +76,4 @@ Huge credit goes to ZenTimings and irusanov without his project this wouldn't be
 
 ### Disclaimer
 
-This project's code was AI-generated using [Claude](https://claude.ai/) (Anthropic). While it has been reviewed and tested, use it at your own risk.
+This project's code was made with the assistance of [Claude](https://claude.ai/) (Anthropic). While it has been reviewed and tested, use it at your own risk.
