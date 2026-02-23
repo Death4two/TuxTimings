@@ -68,4 +68,8 @@ This project is licensed under the **GNU General Public License v3.0**. See [LIC
 - **[AMD's public documentation](https://www.amd.com/en/support/tech-docs)** — SMN/PM table and DRAM timing references.
 - **Tux icon** — Tux the penguin originally by Larry Ewing, created with GIMP (`lewing@isc.tamu.edu`), used and/or modified under the terms of the original image permission.
 
-Huge credit goes to ZenTimings and irusanov — without his project this wouldn't be possible.
+Huge credit goes to ZenTimings and irusanov without his project this wouldn't be possible.
+
+### Disclaimer
+
+This project's code was AI-generated using [Claude](https://claude.ai/) (Anthropic). While it has been reviewed and tested, use it at your own risk.
