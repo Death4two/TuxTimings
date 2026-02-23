@@ -1,7 +1,18 @@
 # C build artifacts
-*.o
+**/*.o
 *.a
 tuxtimings
+
+# Kernel module build artifacts
+*.ko
+*.mod
+*.mod.c
+*.mod.o
+*.symvers
+modules.order
+Module.symvers
+.*.cmd
+.module-common.o
 
 # Package build outputs
 AppDir/

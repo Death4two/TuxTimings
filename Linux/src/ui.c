@@ -6,6 +6,11 @@
 
 /* ── CSS theme (GitHub dark) ────────────────────────────────────────── */
 
+#define APP_VERSION "v1.0.2"
+
+/* float→double promotion in variadic snprintf calls is harmless here */
+#pragma GCC diagnostic ignored "-Wdouble-promotion"
+
 static const char *css_data =
     "window { background-color: #0D1117; }\n"
     ".header-title { color: #E6EDF3; font-size: 16px; font-weight: bold; }\n"
@@ -14,7 +19,7 @@ static const char *css_data =
     ".section-title { color: #C9D1D9; font-size: 13px; font-weight: bold; }\n"
     ".label { color: #8B949E; font-size: 12px; }\n"
     ".value-highlight { color: #3FB950; font-size: 12px; }\n"
-    ".section-box { background-color: #161B22; border-radius: 6px; padding: 10px; }\n"
+    ".section-box { background-color: #161B22; border-radius: 6px; padding: 6px; }\n"
     "notebook { background: transparent; }\n"
     "notebook > header { background: transparent; border-bottom: 1px solid #30363D; }\n"
     "notebook > header > tabs > tab { color: #8B949E; background: transparent; padding: 6px 16px; }\n"
@@ -121,12 +126,25 @@ static GtkWidget *build_ram_tab(app_widgets_t *w)
         grid_row(g, r++, "BCLK:", &w->lbl_bclk);
         gtk_box_append(GTK_BOX(dimm_box), g);
 
+        /* GDM / PowerDown / Temp — horizontal: labels row then values row */
         GtkWidget *g2 = gtk_grid_new();
         gtk_grid_set_row_spacing(GTK_GRID(g2), 2);
-        gtk_grid_set_column_spacing(GTK_GRID(g2), 8);
-        grid_row(g2, 0, "GDM:", &w->lbl_gdm);
-        grid_row(g2, 1, "PowerDown:", &w->lbl_powerdown);
-        grid_row(g2, 2, "Temp:", &w->lbl_spd_temp);
+        gtk_grid_set_column_spacing(GTK_GRID(g2), 12);
+        gtk_widget_set_margin_top(g2, 4);
+
+        GtkWidget *lbl_gdm_h   = make_label("GDM",       "label");
+        GtkWidget *lbl_pd_h    = make_label("PowerDown", "label");
+        GtkWidget *lbl_temp_h  = make_label("Temp",      "label");
+        w->lbl_gdm       = make_value("—");
+        w->lbl_powerdown = make_value("—");
+        w->lbl_spd_temp  = make_value("—");
+
+        gtk_grid_attach(GTK_GRID(g2), lbl_gdm_h,        0, 0, 1, 1);
+        gtk_grid_attach(GTK_GRID(g2), lbl_pd_h,         1, 0, 1, 1);
+        gtk_grid_attach(GTK_GRID(g2), lbl_temp_h,       2, 0, 1, 1);
+        gtk_grid_attach(GTK_GRID(g2), w->lbl_gdm,       0, 1, 1, 1);
+        gtk_grid_attach(GTK_GRID(g2), w->lbl_powerdown, 1, 1, 1, 1);
+        gtk_grid_attach(GTK_GRID(g2), w->lbl_spd_temp,  2, 1, 1, 1);
         gtk_box_append(GTK_BOX(dimm_box), g2);
     }
     gtk_box_append(GTK_BOX(top), dimm_box);
@@ -331,9 +349,8 @@ static void refresh_ui(app_widgets_t *w)
 
     /* Header */
     set_label_text(w->lbl_cpu_name, s->cpu.processor_name[0] ? s->cpu.processor_name : s->cpu.name);
-    set_label_text(w->lbl_codename, s->cpu.codename);
-    set_label_text(w->lbl_smu_version, s->cpu.smu_version);
-    set_label_text(w->lbl_pm_table_version, s->cpu.pm_table_version);
+    set_label_fmt(w->lbl_codename, "%s  ·  SMU %s  ·  PM %s",
+                  s->cpu.codename, s->cpu.smu_version, s->cpu.pm_table_version);
     set_label_text(w->lbl_board_info, s->board.display_line);
 
     /* Module dropdown — populate once */
@@ -404,7 +421,7 @@ static void refresh_ui(app_widgets_t *w)
     set_label_fmt(w->lbl_tfaw, "%u", d->tfaw);
     set_label_fmt(w->lbl_twr, "%u", d->twr);
     set_label_fmt(w->lbl_tcwl, "%u", d->tcwl);
-    set_label_fmt(w->lbl_trfc_ns, "%.2f", d->trfc_ns);
+    set_label_fmt(w->lbl_trfc_ns, "%.0f", d->trfc_ns);
     set_label_fmt(w->lbl_rfc, "%u", d->rfc);
     set_label_fmt(w->lbl_rfc2, "%u", d->rfc2);
     set_label_fmt(w->lbl_rfcsb, "%u", d->rfcsb);
@@ -422,7 +439,7 @@ static void refresh_ui(app_widgets_t *w)
     set_label_fmt(w->lbl_wrwr_sd, "%u", d->wrwr_sd);
     set_label_fmt(w->lbl_wrwr_dd, "%u", d->wrwr_dd);
     set_label_fmt(w->lbl_refi, "%u", d->refi);
-    set_label_fmt(w->lbl_trefi_ns, "%.2f", d->trefi_ns);
+    set_label_fmt(w->lbl_trefi_ns, "%.0f", d->trefi_ns);
     set_label_fmt(w->lbl_wrpre, "%u", d->wrpre);
     set_label_fmt(w->lbl_rdpre, "%u", d->rdpre);
 
@@ -550,7 +567,7 @@ static void on_activate(GtkApplication *app, gpointer user_data)
     /* Window */
     w->window = gtk_application_window_new(app);
     gtk_window_set_title(GTK_WINDOW(w->window), "TuxTimings");
-    gtk_window_set_default_size(GTK_WINDOW(w->window), 900, 860);
+    gtk_window_set_default_size(GTK_WINDOW(w->window), 360, 720);
     gtk_window_set_resizable(GTK_WINDOW(w->window), FALSE);
 
     /* Window icon: use icon theme name (works when installed to hicolor) */
@@ -583,11 +600,17 @@ static void on_activate(GtkApplication *app, gpointer user_data)
     w->lbl_codename = make_label("", "header-muted");
     w->lbl_smu_version = make_label("", "footer-muted");
     w->lbl_pm_table_version = make_label("", "footer-muted");
-    w->lbl_board_info = make_label("", "header-muted");
     gtk_box_append(GTK_BOX(header), w->lbl_codename);
-    gtk_box_append(GTK_BOX(header), w->lbl_smu_version);
-    gtk_box_append(GTK_BOX(header), w->lbl_pm_table_version);
-    gtk_box_append(GTK_BOX(header), w->lbl_board_info);
+
+    /* Board info row: board string left, version right */
+    GtkWidget *board_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    w->lbl_board_info = make_label("", "footer-muted");
+    gtk_widget_set_hexpand(w->lbl_board_info, TRUE);
+    GtkWidget *lbl_version = make_label(APP_VERSION, "footer-muted");
+    gtk_label_set_xalign(GTK_LABEL(lbl_version), 1.0f);
+    gtk_box_append(GTK_BOX(board_row), w->lbl_board_info);
+    gtk_box_append(GTK_BOX(board_row), lbl_version);
+    gtk_box_append(GTK_BOX(header), board_row);
     gtk_box_append(GTK_BOX(main_box), header);
 
     /* Notebook (tabs) */

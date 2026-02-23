@@ -19,4 +19,12 @@ Linux/TuxTimings.LinuxBackend/pm_tables.c
 *.tar.gz
 *.pkg.tar.zst
 pkg/
-src/
+/src/
+
+# Debug/dump output files
+pm_table_dump.txt
+*.dsl
+
+# AppImage build outputs (built AppImage, not the tool)
+Linux/TuxTimings-*.AppImage
+Linux/appimagetool-*.AppImage

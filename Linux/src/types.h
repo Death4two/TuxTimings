@@ -23,7 +23,7 @@ typedef struct {
     uint32_t clock_speed_mhz;
     mem_rank_t rank;
     /* Derived */
-    char slot_label[16];   /* e.g. "A1", "Slot 0" */
+    char slot_label[24];   /* e.g. "A1", "Slot 0" */
     char slot_display[64]; /* e.g. "A1 - 16.0 GiB" */
     char capacity_display[32]; /* e.g. "16.0 GiB" */
 } memory_module_t;
@@ -48,24 +48,24 @@ typedef struct {
     char bios_version[STR_LEN];
     char bios_date[STR_SHORT];
     char agesa_version[STR_LEN];
-    char display_line[512];
+    char display_line[1024];
 } board_info_t;
 
 typedef struct {
     /* Power */
-    float package_power_w;
+    float package_power_w; /* reserved — populated but not yet displayed */
     float ppt_w;
-    float package_current_a;
+    float package_current_a; /* reserved — populated but not yet displayed */
     /* Voltages */
     float vcore, vsoc, vddp, vddg_ccd, vddg_iod, vdd_misc;
     float cpu_vddio, mem_vdd, mem_vddq, mem_vpp;
     float vid;
     /* Clocks */
-    float core_clock_mhz, bclk_mhz;
+    float core_clock_mhz, bclk_mhz; /* reserved */
     float fclk_mhz, uclk_mhz, mclk_mhz;
-    float memory_clock_mhz;
-    float core_clocks_ghz[MAX_CORES];
-    int   core_clocks_count;
+    float memory_clock_mhz; /* reserved */
+    float core_clocks_ghz[MAX_CORES]; /* reserved */
+    int   core_clocks_count; /* reserved */
     /* Temps */
     float cpu_temp_c;
     float core_temps_c[MAX_CORES];
@@ -106,7 +106,8 @@ typedef struct {
     /* RFC */
     uint32_t rfc, rfc2, rfcsb;
     /* Nanoseconds */
-    float trefi_ns, trfc_ns, trfc2_ns, trfcsb_ns;
+    float trefi_ns, trfc_ns;
+    float trfc2_ns, trfcsb_ns; /* reserved — computed but not displayed */
     /* Flags */
     bool gdm_enabled, power_down_enabled;
     char cmd2t[4];

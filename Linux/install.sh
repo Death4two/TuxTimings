@@ -41,6 +41,38 @@ if [ "$1" = "--uninstall" ]; then
         rm -f "$DESKTOP_DIR/tuxtimings.desktop"
     fi
 
+    # Optionally remove ryzen_smu DKMS module
+    if command -v dkms &>/dev/null; then
+        SMU_VER=$(dkms status ryzen_smu 2>/dev/null | grep -oP '(?<=ryzen_smu, )[0-9.]+' | head -1)
+        if [ -n "$SMU_VER" ]; then
+            read -rp "    Remove ryzen_smu DKMS module ($SMU_VER)? [y/N] " answer
+            case "$answer" in
+                [yY]*)
+                    rmmod ryzen_smu 2>/dev/null || true
+                    dkms remove ryzen_smu/"$SMU_VER" --all 2>/dev/null || true
+                    rm -rf "/usr/src/ryzen_smu-$SMU_VER"
+                    echo "    ryzen_smu removed."
+                    ;;
+            esac
+        fi
+    fi
+
+    # Optionally remove aod-voltages DKMS module
+    if command -v dkms &>/dev/null; then
+        AOD_VER=$(dkms status aod-voltages 2>/dev/null | grep -oP '(?<=aod-voltages, )[0-9.]+' | head -1)
+        if [ -n "$AOD_VER" ]; then
+            read -rp "    Remove aod-voltages DKMS module ($AOD_VER)? [y/N] " answer
+            case "$answer" in
+                [yY]*)
+                    rmmod aod_voltages 2>/dev/null || true
+                    dkms remove aod-voltages/"$AOD_VER" --all 2>/dev/null || true
+                    rm -rf "/usr/src/aod-voltages-$AOD_VER"
+                    echo "    aod-voltages removed."
+                    ;;
+            esac
+        fi
+    fi
+
     echo "==> TuxTimings has been uninstalled."
     exit 0
 fi
@@ -95,7 +127,7 @@ if [ "$1" = "--deb" ]; then
         "$MAKE" -C "$SCRIPT_DIR" clean all
     fi
 
-    PKG_VERSION="1.0.0"
+    PKG_VERSION="1.0.2"
     DEB_ROOT="$SCRIPT_DIR/deb-build/tuxtimings_${PKG_VERSION}_amd64"
     rm -rf "$SCRIPT_DIR/deb-build"
     mkdir -p "$DEB_ROOT/DEBIAN"
@@ -112,7 +144,8 @@ Version: $PKG_VERSION
 Section: utils
 Priority: optional
 Architecture: amd64
-Depends: libgtk-4-1, dmidecode
+Depends: libgtk-4-1
+Recommends: dkms, linux-headers-generic
 Maintainer: Death4two <https://github.com/Death4two>
 Description: AMD Ryzen DRAM timings and CPU telemetry viewer (GTK4)
  Displays real-time DRAM timings, CPU frequencies, temperatures,
@@ -285,6 +318,124 @@ if [ -f "$SCRIPT_DIR/tuxtimings.png" ]; then
     mkdir -p /usr/share/icons/hicolor/256x256/apps
     cp "$SCRIPT_DIR/tuxtimings.png" /usr/share/icons/hicolor/256x256/apps/
     gtk-update-icon-cache /usr/share/icons/hicolor/ 2>/dev/null || true
+fi
+
+# ── ryzen_smu kernel module ──────────────────────────────────────────
+install_ryzen_smu() {
+    local SMU_SRC="$REPO_DIR/ryzen_smu-src"
+    local SMU_VER
+
+    # Check if already loaded or installed as DKMS module
+    if modprobe ryzen_smu 2>/dev/null; then
+        echo "==> ryzen_smu module already available and loaded."
+        return 0
+    fi
+
+    echo "==> ryzen_smu kernel module not found."
+
+    # Need dkms and kernel headers
+    if ! command -v dkms &>/dev/null; then
+        echo "    WARNING: dkms not found. Install dkms and linux-headers to build ryzen_smu."
+        echo "      Arch:   pacman -S dkms linux-headers"
+        echo "      Ubuntu: apt install dkms linux-headers-\$(uname -r)"
+        return 1
+    fi
+
+    # Clone if source not present
+    if [ ! -d "$SMU_SRC" ]; then
+        echo "==> Cloning ryzen_smu source..."
+        if ! su "$REAL_USER" -c "git clone https://github.com/amkillam/ryzen_smu '$SMU_SRC'" 2>/dev/null; then
+            echo "    WARNING: Failed to clone ryzen_smu. Install it manually:"
+            echo "      https://github.com/amkillam/ryzen_smu"
+            return 1
+        fi
+    fi
+
+    SMU_VER=$(grep '^VERSION' "$SMU_SRC/Makefile" | head -1 | awk '{print $NF}')
+    SMU_VER=${SMU_VER:-0.1.7}
+
+    echo "==> Installing ryzen_smu $SMU_VER via DKMS..."
+    local DKMS_SRC="/usr/src/ryzen_smu-$SMU_VER"
+    mkdir -p "$DKMS_SRC"
+    cp "$SMU_SRC/dkms.conf" "$SMU_SRC/Makefile" "$SMU_SRC"/*.c "$SMU_SRC"/*.h "$DKMS_SRC/"
+
+    if dkms add ryzen_smu/"$SMU_VER" 2>/dev/null || true; then
+        if dkms build ryzen_smu/"$SMU_VER" && dkms install ryzen_smu/"$SMU_VER"; then
+            modprobe ryzen_smu && echo "==> ryzen_smu loaded successfully." || true
+        else
+            echo "    WARNING: DKMS build failed. Check kernel headers are installed."
+            return 1
+        fi
+    fi
+}
+
+install_ryzen_smu || true
+
+# ── aod-voltages kernel module ────────────────────────────────────────
+install_aod_voltages() {
+    local AOD_SRC="$SCRIPT_DIR/src/aod-voltages"
+
+    if [ ! -d "$AOD_SRC" ]; then
+        echo "    WARNING: aod-voltages source not found at $AOD_SRC, skipping."
+        return 0
+    fi
+
+    if ! command -v dkms &>/dev/null; then
+        echo "    WARNING: dkms not found — cannot install aod-voltages module."
+        return 0
+    fi
+
+    # Already installed?
+    if modprobe aod_voltages 2>/dev/null; then
+        echo "==> aod-voltages module already available and loaded."
+        return 0
+    fi
+
+    local AOD_VER
+    AOD_VER=$(grep '^PACKAGE_VERSION=' "$AOD_SRC/dkms.conf" | cut -d= -f2 | tr -d '"')
+    echo "==> Installing aod-voltages $AOD_VER via DKMS..."
+
+    local DKMS_SRC="/usr/src/aod-voltages-$AOD_VER"
+    mkdir -p "$DKMS_SRC"
+    cp "$AOD_SRC/dkms.conf" "$AOD_SRC/Makefile" "$AOD_SRC"/*.c "$DKMS_SRC/"
+
+    if dkms add aod-voltages/"$AOD_VER" 2>/dev/null || true; then
+        if dkms build aod-voltages/"$AOD_VER" && dkms install aod-voltages/"$AOD_VER"; then
+            modprobe aod_voltages && echo "==> aod-voltages loaded successfully." || true
+        else
+            echo "    WARNING: aod-voltages DKMS build failed. Check kernel headers."
+            return 1
+        fi
+    fi
+}
+
+install_aod_voltages || true
+
+# ── nct6775 kernel module (Nuvoton Super I/O fan/temp) ────────────────
+install_nct6775() {
+    # nct6775 is in mainline Linux since ~5.15 — try loading the built-in first.
+    if modprobe nct6775 2>/dev/null; then
+        echo "==> nct6775 module loaded (covers NCT6775F–NCT6799D fan/temp chips)."
+        return 0
+    fi
+
+    # Module not present in this kernel — offer DKMS option.
+    echo "    NOTE: nct6775 kernel module not found (fan/temp readings will be unavailable)."
+    if command -v dkms &>/dev/null; then
+        echo "    To enable fan readings, install the nct6775 DKMS module:"
+        echo "      Arch:   yay -S nct6775-dkms-git"
+        echo "      Other:  https://github.com/Fred78290/nct6775"
+    fi
+    return 0  # non-fatal
+}
+
+install_nct6775 || true
+
+# ── msr kernel module ─────────────────────────────────────────────────
+if modprobe msr 2>/dev/null; then
+    echo "==> msr module loaded (required for BCLK reading)."
+else
+    echo "    NOTE: msr module unavailable — BCLK will show as 0.0 MHz."
 fi
 
 echo "==> Installation complete!"

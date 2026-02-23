@@ -10,6 +10,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <libcpuid/libcpuid.h>
 
 #define SMU_PATH "/sys/kernel/ryzen_smu_drv"
 
@@ -449,7 +450,7 @@ static float read_temp_input(const char *hwmon_dir, int index)
 
 static void apply_zenpower(smu_metrics_t *m)
 {
-    char zpdir[512];
+    char zpdir[640];
     if (!find_hwmon_by_name("zenpower", zpdir, sizeof(zpdir))) return;
 
     DIR *d = opendir(zpdir);
@@ -460,7 +461,7 @@ static void apply_zenpower(smu_metrics_t *m)
         if (strncmp(ent->d_name, "in", 2) == 0 && strstr(ent->d_name, "_label")) {
             int idx = 0;
             if (sscanf(ent->d_name, "in%d_label", &idx) != 1) continue;
-            char lpath[512], vpath[512], label[64];
+            char lpath[640], vpath[640], label[64];
             snprintf(lpath, sizeof(lpath), "%s/in%d_label", zpdir, idx);
             snprintf(vpath, sizeof(vpath), "%s/in%d_input", zpdir, idx);
             if (!read_file_string(lpath, label, sizeof(label))) continue;
@@ -482,7 +483,7 @@ static void apply_zenpower(smu_metrics_t *m)
         if (strncmp(ent->d_name, "power", 5) == 0 && strstr(ent->d_name, "_label")) {
             int idx = 0;
             if (sscanf(ent->d_name, "power%d_label", &idx) != 1) continue;
-            char lpath[512], vpath[512], label[64];
+            char lpath[640], vpath[640], label[64];
             snprintf(lpath, sizeof(lpath), "%s/power%d_label", zpdir, idx);
             snprintf(vpath, sizeof(vpath), "%s/power%d_input", zpdir, idx);
             if (!read_file_string(lpath, label, sizeof(label))) continue;
@@ -497,7 +498,7 @@ static void apply_zenpower(smu_metrics_t *m)
         if (strncmp(ent->d_name, "curr", 4) == 0 && strstr(ent->d_name, "_label")) {
             int idx = 0;
             if (sscanf(ent->d_name, "curr%d_label", &idx) != 1) continue;
-            char lpath[512], vpath[512], label[64];
+            char lpath[640], vpath[640], label[64];
             snprintf(lpath, sizeof(lpath), "%s/curr%d_label", zpdir, idx);
             snprintf(vpath, sizeof(vpath), "%s/curr%d_input", zpdir, idx);
             if (!read_file_string(lpath, label, sizeof(label))) continue;
@@ -516,7 +517,7 @@ static void apply_zenpower(smu_metrics_t *m)
 
 static void apply_k10temp_tctl_tccd(smu_metrics_t *m)
 {
-    char k10dir[512];
+    char k10dir[640];
     if (find_hwmon_by_name("k10temp", k10dir, sizeof(k10dir))) {
         float tctl = read_temp_input(k10dir, 1);
         float tccd1 = read_temp_input(k10dir, 3);
@@ -534,7 +535,7 @@ static void apply_k10temp_tctl_tccd(smu_metrics_t *m)
     }
 
     /* Fallback: zenpower Tdie/Tctl/Tccd1 from labels */
-    char zpdir[512];
+    char zpdir[640];
     if (!find_hwmon_by_name("zenpower", zpdir, sizeof(zpdir))) return;
 
     DIR *d = opendir(zpdir);
@@ -545,7 +546,7 @@ static void apply_k10temp_tctl_tccd(smu_metrics_t *m)
             continue;
         int idx = 0;
         if (sscanf(ent->d_name, "temp%d_label", &idx) != 1) continue;
-        char lpath[512], label[64];
+        char lpath[640], label[64];
         snprintf(lpath, sizeof(lpath), "%s/temp%d_label", zpdir, idx);
         if (!read_file_string(lpath, label, sizeof(label))) continue;
         float c = read_temp_input(zpdir, idx);
@@ -582,7 +583,7 @@ static void apply_per_core_temps_hwmon(smu_metrics_t *m)
     struct dirent *ent;
     while ((ent = readdir(hwmon))) {
         if (ent->d_name[0] == '.') continue;
-        char dir[512];
+        char dir[640];
         snprintf(dir, sizeof(dir), "/sys/class/hwmon/%s", ent->d_name);
 
         DIR *d2 = opendir(dir);
@@ -593,7 +594,7 @@ static void apply_per_core_temps_hwmon(smu_metrics_t *m)
                 continue;
             int idx = 0;
             if (sscanf(e2->d_name, "temp%d_label", &idx) != 1) continue;
-            char lpath[512], label[64];
+            char lpath[640], label[64];
             snprintf(lpath, sizeof(lpath), "%s/temp%d_label", dir, idx);
             if (!read_file_string(lpath, label, sizeof(label))) continue;
             if (strncmp(label, "Core ", 5) != 0) continue;
@@ -622,7 +623,7 @@ static void read_spd_temps(smu_metrics_t *m)
     m->spd_temps_count = 0;
     while ((ent = readdir(hwmon)) && m->spd_temps_count < MAX_MODULES) {
         if (ent->d_name[0] == '.') continue;
-        char namepath[512], name[64];
+        char namepath[640], name[64];
         snprintf(namepath, sizeof(namepath), "/sys/class/hwmon/%s/name", ent->d_name);
         if (!read_file_string(namepath, name, sizeof(name))) continue;
         char lower[64];
@@ -632,7 +633,7 @@ static void read_spd_temps(smu_metrics_t *m)
         lower[li] = '\0';
         if (!strstr(lower, "spd5118")) continue;
 
-        char tpath[512];
+        char tpath[640];
         snprintf(tpath, sizeof(tpath), "/sys/class/hwmon/%s/temp1_input", ent->d_name);
         int raw = read_int_file(tpath);
         if (raw == 0) continue;
@@ -653,7 +654,7 @@ static void read_fans(fan_reading_t *fans, int *count)
     struct dirent *ent;
     while ((ent = readdir(hwmon))) {
         if (ent->d_name[0] == '.') continue;
-        char namepath[512], name[64];
+        char namepath[640], name[64];
         snprintf(namepath, sizeof(namepath), "/sys/class/hwmon/%s/name", ent->d_name);
         if (!read_file_string(namepath, name, sizeof(name))) continue;
         char lower[64];
@@ -664,11 +665,11 @@ static void read_fans(fan_reading_t *fans, int *count)
         if (strncmp(lower, "nct6", 4) != 0 && !strstr(lower, "nuvoton"))
             continue;
 
-        char dir[512];
+        char dir[640];
         snprintf(dir, sizeof(dir), "/sys/class/hwmon/%s", ent->d_name);
         int found_any = 0;
         for (int i = 1; i <= 7 && *count < MAX_FANS; i++) {
-            char path[512];
+            char path[640];
             snprintf(path, sizeof(path), "%s/fan%d_input", dir, i);
             int rpm = read_int_file(path);
             if (rpm <= 0) continue;
@@ -781,54 +782,42 @@ static void read_core_freq(smu_metrics_t *m)
 
 /* ── BCLK from MSR ──────────────────────────────────────────────────── */
 
-static uint64_t read_msr(int cpu, uint32_t reg)
+static int read_p0_msr_fields(uint64_t *cpuFid_out, uint64_t *cpuDfsId_out)
 {
-    char path[64];
-    snprintf(path, sizeof(path), "/dev/cpu/%d/msr", cpu);
-    int fd = open(path, O_RDONLY);
+    /*
+     * CONFIG_X86_MSR=y — the device is always present without modprobe.
+     * Use pread directly with the MSR address as the file offset.
+     */
+    int fd = open("/dev/cpu/0/msr", O_RDONLY);
     if (fd < 0) return 0;
-
-    uint8_t buf[8];
-    if (lseek(fd, (off_t)reg, SEEK_SET) < 0) { close(fd); return 0; }
-    if (read(fd, buf, 8) != 8) { close(fd); return 0; }
-    close(fd);
-
     uint64_t val = 0;
-    for (int i = 0; i < 8; i++) val |= (uint64_t)buf[i] << (i * 8);
-    return val;
+    ssize_t n = pread(fd, &val, sizeof(val), (off_t)0xC0010064);
+    close(fd);
+    if (n != (ssize_t)sizeof(val)) return 0;
+
+    *cpuFid_out   = val & 0xFF;
+    *cpuDfsId_out = (val >> 8) & 0x3F;
+    return 1;
 }
 
 static float try_read_bclk(void)
 {
     /*
      * AMD Zen BCLK derivation:
-     *   MSR 0xC0010064 (P-state 0) contains CpuFid and CpuDfsId.
-     *   P0 frequency = (CpuFid / CpuDfsId) * 200 MHz
-     *   BCLK = actual_freq / multiplier
-     *
-     * We read the TSC frequency (most stable) or fall back to cpuinfo_max_freq,
-     * then derive BCLK = actual_freq / P0_multiplier.
-     *
-     * Alternatively, if the kernel exposes tsc_khz in dmesg/cpuinfo, use that.
+     *   MSR 0xC0010064 (P-state 0):
+     *     bits [7:0]  = CpuFid
+     *     bits [13:8] = CpuDfsId
+     *   P0 multiplier = (CpuFid / CpuDfsId) * 2
+     *   BCLK = cpuinfo_max_freq / p0_mult
      */
-
-    /* Read P0 state MSR */
-    uint64_t msr = read_msr(0, 0xC0010064);
-    if (msr == 0) return 0;
-
-    uint32_t cpuFid   = (uint32_t)(msr & 0xFF);
-    uint32_t cpuDfsId = (uint32_t)((msr >> 8) & 0x3F);
+    uint64_t cpuFid = 0, cpuDfsId = 0;
+    if (!read_p0_msr_fields(&cpuFid, &cpuDfsId)) return 0;
     if (cpuDfsId == 0 || cpuFid == 0) return 0;
 
-    double p0_mult = ((double)cpuFid / (double)cpuDfsId) * 2.0;
+    double p0_mult = (double)cpuFid / (double)cpuDfsId;
     if (p0_mult <= 0.1 || p0_mult > 200.0) return 0;
 
-    /*
-     * Get actual reference frequency:
-     * 1. Try cpuinfo_max_freq (stable, represents max boost at current BCLK)
-     * 2. Fall back to scaling_max_freq
-     * 3. Fall back to scaling_cur_freq
-     */
+    /* Stable reference: kernel-reported max boost frequency */
     float ref_mhz = 0;
     const char *freq_files[] = {
         "/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq",
@@ -842,14 +831,7 @@ static float try_read_bclk(void)
     }
     if (ref_mhz <= 0) return 0;
 
-    /*
-     * The max freq reported by cpuinfo_max_freq corresponds to the max boost
-     * P-state. Read the max boost P-state (highest enabled) to get its multiplier.
-     * For simplicity, use P0 which is the highest performance state.
-     *
-     * BCLK = ref_mhz / p0_mult
-     */
-    float bclk = (float)(ref_mhz / p0_mult);
+    float bclk = (float)ref_mhz / (float)p0_mult;
     return (bclk >= 80.0f && bclk <= 120.0f) ? bclk : 0;
 }
 
@@ -899,8 +881,29 @@ void backend_read_summary(system_summary_t *out)
 {
     memset(out, 0, sizeof(*out));
 
-    /* Cache static data on first call */
+    /* Load kernel modules and cache static data on first call */
     if (!s_cached_static) {
+        /* Use absolute path — pkexec strips PATH */
+        const char *mp = access("/usr/bin/modprobe", X_OK) == 0 ? "/usr/bin/modprobe" :
+                         access("/sbin/modprobe",    X_OK) == 0 ? "/sbin/modprobe"    :
+                                                                   "modprobe";
+        char cmd[256];
+        snprintf(cmd, sizeof(cmd), "%s msr 2>/dev/null", mp);
+        (void)system(cmd);
+        snprintf(cmd, sizeof(cmd), "%s ryzen_smu 2>/dev/null", mp);
+        (void)system(cmd);
+
+        /* Load nct6775 if no Nuvoton hwmon driver is active.
+         * Covers NCT6775F/6776F/6779D/6791D/6792D/6793D/
+         *        6795D/6796D/6797D/6798D/6799D — no-op if hardware absent. */
+        {
+            char hwmon_path[640];
+            if (!find_hwmon_by_name("nct6", hwmon_path, sizeof(hwmon_path))) {
+                snprintf(cmd, sizeof(cmd), "%s nct6775 2>/dev/null", mp);
+                (void)system(cmd);
+            }
+        }
+
         parse_dmidecode_processor();
         parse_dmidecode_board();
         parse_dmidecode_memory();
@@ -943,6 +946,17 @@ void backend_read_summary(system_summary_t *out)
 
     /* BCLK from MSR */
     out->metrics.bclk_mhz = try_read_bclk();
+
+    /* Memory voltages from aod_voltages kernel module sysfs */
+    {
+        int mv;
+        mv = read_int_file("/sys/kernel/aod_voltages/mem_vddio");
+        if (mv > 500 && mv < 3000) out->metrics.mem_vdd  = mv / 1000.0f;
+        mv = read_int_file("/sys/kernel/aod_voltages/mem_vddq");
+        if (mv > 500 && mv < 3000) out->metrics.mem_vddq = mv / 1000.0f;
+        mv = read_int_file("/sys/kernel/aod_voltages/mem_vpp");
+        if (mv > 500 && mv < 3000) out->metrics.mem_vpp  = mv / 1000.0f;
+    }
 
     /* hwmon overlays */
     apply_zenpower(&out->metrics);
