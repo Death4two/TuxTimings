@@ -92,6 +92,15 @@ exec pkexec /opt/TuxTimings/bin/tuxtimings $ENV_ARGS "$@"
 LAUNCHER
 }
 
+pre_install() {
+    # Remove any leftover aod-voltages DKMS source dirs from previous installs
+    rm -rf /usr/src/aod-voltages-*/
+}
+
+pre_upgrade() {
+    pre_install
+}
+
 post_install() {
     local aod_ver
     aod_ver=$(grep '^PACKAGE_VERSION=' /usr/src/aod-voltages-*/dkms.conf 2>/dev/null | head -1 | cut -d= -f2 | tr -d '"')
