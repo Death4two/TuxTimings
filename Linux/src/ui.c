@@ -60,13 +60,15 @@ static GtkWidget *make_value(const char *text)
     return l;
 }
 
-static void grid_row(GtkWidget *grid, int row, const char *label_text, GtkWidget **out_val)
+static void grid_row(GtkWidget *grid, int row, const char *label_text,
+                     GtkWidget **out_lbl, GtkWidget **out_val)
 {
     GtkWidget *lbl = make_label(label_text, "label");
     *out_val = make_value("—");
     gtk_widget_set_hexpand(grid, TRUE);
     gtk_grid_attach(GTK_GRID(grid), lbl, 0, row, 1, 1);
     gtk_grid_attach(GTK_GRID(grid), *out_val, 1, row, 1, 1);
+    if (out_lbl) *out_lbl = lbl;
 }
 
 static void set_label_text(GtkWidget *label, const char *text)
@@ -119,11 +121,11 @@ static GtkWidget *build_ram_tab(app_widgets_t *w)
         gtk_grid_set_row_spacing(GTK_GRID(g), 4);
         gtk_grid_set_column_spacing(GTK_GRID(g), 8);
         int r = 0;
-        grid_row(g, r++, "Speed:", &w->lbl_speed);
-        grid_row(g, r++, "MCLK:", &w->lbl_mclk);
-        grid_row(g, r++, "FCLK:", &w->lbl_fclk);
-        grid_row(g, r++, "UCLK:", &w->lbl_uclk);
-        grid_row(g, r++, "BCLK:", &w->lbl_bclk);
+        grid_row(g, r++, "Speed:", NULL, &w->lbl_speed);
+        grid_row(g, r++, "MCLK:", NULL, &w->lbl_mclk);
+        grid_row(g, r++, "FCLK:", NULL, &w->lbl_fclk);
+        grid_row(g, r++, "UCLK:", NULL, &w->lbl_uclk);
+        grid_row(g, r++, "BCLK:", NULL, &w->lbl_bclk);
         gtk_box_append(GTK_BOX(dimm_box), g);
 
         /* GDM / PowerDown / Temp — horizontal: labels row then values row */
@@ -159,12 +161,13 @@ static GtkWidget *build_ram_tab(app_widgets_t *w)
         gtk_grid_set_row_spacing(GTK_GRID(g), 2);
         gtk_grid_set_column_spacing(GTK_GRID(g), 8);
         int r = 0;
-        grid_row(g, r++, "Capacity:", &w->lbl_capacity);
-        grid_row(g, r++, "Manufacturer:", &w->lbl_manufacturer);
-        grid_row(g, r++, "Part Number:", &w->lbl_part_number);
-        grid_row(g, r++, "Serial:", &w->lbl_serial_number);
-        grid_row(g, r++, "Rank:", &w->lbl_rank);
-        grid_row(g, r++, "Cmd2T:", &w->lbl_cmd2t);
+        grid_row(g, r++, "Capacity:", NULL, &w->lbl_capacity);
+        grid_row(g, r++, "Manufacturer:", NULL, &w->lbl_manufacturer);
+        grid_row(g, r++, "Part Number:", NULL, &w->lbl_part_number);
+        grid_row(g, r++, "Serial:", NULL, &w->lbl_serial_number);
+        grid_row(g, r++, "Rank:", NULL, &w->lbl_rank);
+        grid_row(g, r++, "Cmd2T:", NULL, &w->lbl_cmd2t);
+        grid_row(g, r++, "Gear:",  &w->row_lbl_intel_gear, &w->lbl_intel_gear);
         gtk_box_append(GTK_BOX(info_box), g);
     }
     gtk_box_append(GTK_BOX(top), info_box);
@@ -172,24 +175,24 @@ static GtkWidget *build_ram_tab(app_widgets_t *w)
     /* Voltages */
     GtkWidget *volt_box = make_section_box();
     {
-        GtkWidget *title = make_label("Voltages", "section-title");
-        gtk_box_append(GTK_BOX(volt_box), title);
+        w->lbl_section_voltages = make_label("Voltages", "section-title");
+        gtk_box_append(GTK_BOX(volt_box), w->lbl_section_voltages);
 
         GtkWidget *g = gtk_grid_new();
         gtk_grid_set_row_spacing(GTK_GRID(g), 2);
         gtk_grid_set_column_spacing(GTK_GRID(g), 8);
         int r = 0;
-        grid_row(g, r++, "VSOC", &w->lbl_vsoc);
-        grid_row(g, r++, "CLDO VDDP", &w->lbl_vddp);
-        grid_row(g, r++, "VDDG CCD", &w->lbl_vddg_ccd);
-        grid_row(g, r++, "VDDG IOD", &w->lbl_vddg_iod);
-        grid_row(g, r++, "VDD MISC", &w->lbl_vdd_misc);
-        grid_row(g, r++, "MEM VDD", &w->lbl_mem_vdd);
-        grid_row(g, r++, "MEM VDDQ", &w->lbl_mem_vddq);
-        grid_row(g, r++, "CPU VDDIO", &w->lbl_cpu_vddio);
-        grid_row(g, r++, "MEM VPP", &w->lbl_mem_vpp);
-        grid_row(g, r++, "VCORE", &w->lbl_vcore);
-        grid_row(g, r++, "PPT", &w->lbl_ppt);
+        grid_row(g, r++, "VSOC",      &w->row_lbl_vsoc,     &w->lbl_vsoc);
+        grid_row(g, r++, "CLDO VDDP", &w->row_lbl_vddp,     &w->lbl_vddp);
+        grid_row(g, r++, "VDDG CCD",  &w->row_lbl_vddg_ccd, &w->lbl_vddg_ccd);
+        grid_row(g, r++, "VDDG IOD",  &w->row_lbl_vddg_iod,  &w->lbl_vddg_iod);
+        grid_row(g, r++, "VDD MISC",  &w->row_lbl_vdd_misc,  &w->lbl_vdd_misc);
+        grid_row(g, r++, "MEM VDD",   &w->row_lbl_mem_vdd,   &w->lbl_mem_vdd);
+        grid_row(g, r++, "MEM VDDQ",  &w->row_lbl_mem_vddq,  &w->lbl_mem_vddq);
+        grid_row(g, r++, "CPU VDDIO", &w->row_lbl_cpu_vddio, &w->lbl_cpu_vddio);
+        grid_row(g, r++, "MEM VPP",   &w->row_lbl_mem_vpp,   &w->lbl_mem_vpp);
+        grid_row(g, r++, "VCORE",     NULL,                  &w->lbl_vcore);
+        grid_row(g, r++, "PPT",       NULL,                  &w->lbl_ppt);
         gtk_box_append(GTK_BOX(volt_box), g);
     }
     gtk_box_append(GTK_BOX(top), volt_box);
@@ -204,26 +207,31 @@ static GtkWidget *build_ram_tab(app_widgets_t *w)
     /* Primary */
     GtkWidget *prim_box = make_section_box();
     {
-        gtk_box_append(GTK_BOX(prim_box), make_label("Primary Timings", "section-title"));
+        w->lbl_section_primary = make_label("Primary Timings", "section-title");
+        gtk_box_append(GTK_BOX(prim_box), w->lbl_section_primary);
         GtkWidget *g = gtk_grid_new();
         gtk_grid_set_row_spacing(GTK_GRID(g), 2);
         gtk_grid_set_column_spacing(GTK_GRID(g), 8);
         int r = 0;
-        grid_row(g, r++, "tCL", &w->lbl_tcl);
-        grid_row(g, r++, "tRCDRD", &w->lbl_trcd_rd);
-        grid_row(g, r++, "tRCDWR", &w->lbl_trcd_wr);
-        grid_row(g, r++, "tRP", &w->lbl_trp);
-        grid_row(g, r++, "tRAS", &w->lbl_tras);
-        grid_row(g, r++, "tRC", &w->lbl_trc);
-        grid_row(g, r++, "tRRDS", &w->lbl_trrds);
-        grid_row(g, r++, "tRRDL", &w->lbl_trrdl);
-        grid_row(g, r++, "tFAW", &w->lbl_tfaw);
-        grid_row(g, r++, "tWR", &w->lbl_twr);
-        grid_row(g, r++, "tCWL", &w->lbl_tcwl);
-        grid_row(g, r++, "tRFC (ns)", &w->lbl_trfc_ns);
-        grid_row(g, r++, "tRFC", &w->lbl_rfc);
-        grid_row(g, r++, "tRFC2", &w->lbl_rfc2);
-        grid_row(g, r++, "tRFCsb", &w->lbl_rfcsb);
+        grid_row(g, r++, "tCL", NULL, &w->lbl_tcl);
+        grid_row(g, r++, "tRCDRD", NULL, &w->lbl_trcd_rd);
+        grid_row(g, r++, "tRCDWR", NULL, &w->lbl_trcd_wr);
+        grid_row(g, r++, "tRP", NULL, &w->lbl_trp);
+        grid_row(g, r++, "tRAS", NULL, &w->lbl_tras);
+        grid_row(g, r++, "tRC", NULL, &w->lbl_trc);
+        grid_row(g, r++, "tRRDS", NULL, &w->lbl_trrds);
+        grid_row(g, r++, "tRRDL", NULL, &w->lbl_trrdl);
+        grid_row(g, r++, "tFAW", NULL, &w->lbl_tfaw);
+        grid_row(g, r++, "tWR", NULL, &w->lbl_twr);
+        grid_row(g, r++, "tCWL", NULL, &w->lbl_tcwl);
+        grid_row(g, r++, "tRFC (ns)", NULL, &w->lbl_trfc_ns);
+        grid_row(g, r++, "tRFC", NULL, &w->lbl_rfc);
+        grid_row(g, r++, "tRFC2",  &w->row_lbl_rfc2, &w->lbl_rfc2);
+        grid_row(g, r++, "tRFCsb", NULL, &w->lbl_rfcsb);
+        /* Intel-specific rows (hidden on AMD) */
+        grid_row(g, r++, "tRTL",      &w->row_lbl_trtl,      &w->lbl_trtl);
+        grid_row(g, r++, "tPPD",      &w->row_lbl_tppd,      &w->lbl_tppd);
+        grid_row(g, r++, "tREFSBRD",  &w->row_lbl_refsbrd,   &w->lbl_refsbrd);
         gtk_box_append(GTK_BOX(prim_box), g);
     }
     gtk_box_append(GTK_BOX(mid), prim_box);
@@ -231,26 +239,30 @@ static GtkWidget *build_ram_tab(app_widgets_t *w)
     /* Secondary */
     GtkWidget *sec_box = make_section_box();
     {
-        gtk_box_append(GTK_BOX(sec_box), make_label("Secondary Timings", "section-title"));
+        w->lbl_section_secondary = make_label("Secondary Timings", "section-title");
+        gtk_box_append(GTK_BOX(sec_box), w->lbl_section_secondary);
         GtkWidget *g = gtk_grid_new();
         gtk_grid_set_row_spacing(GTK_GRID(g), 2);
         gtk_grid_set_column_spacing(GTK_GRID(g), 8);
         int r = 0;
-        grid_row(g, r++, "tRTP", &w->lbl_rtp);
-        grid_row(g, r++, "tWTRS", &w->lbl_wtrs);
-        grid_row(g, r++, "tWTRL", &w->lbl_wtrl);
-        grid_row(g, r++, "tRDWR", &w->lbl_rdwr);
-        grid_row(g, r++, "tWRRD", &w->lbl_wrrd);
-        grid_row(g, r++, "tRDRDSC", &w->lbl_rdrd_sc);
-        grid_row(g, r++, "tRDRDSD", &w->lbl_rdrd_sd);
-        grid_row(g, r++, "tRDRDDD", &w->lbl_rdrd_dd);
-        grid_row(g, r++, "tWRWRSC", &w->lbl_wrwr_sc);
-        grid_row(g, r++, "tWRWRSD", &w->lbl_wrwr_sd);
-        grid_row(g, r++, "tWRWRDD", &w->lbl_wrwr_dd);
-        grid_row(g, r++, "tREFI", &w->lbl_refi);
-        grid_row(g, r++, "tREFI (ns)", &w->lbl_trefi_ns);
-        grid_row(g, r++, "tWRPRE", &w->lbl_wrpre);
-        grid_row(g, r++, "tRDPRE", &w->lbl_rdpre);
+        grid_row(g, r++, "tRTP", &w->row_lbl_rtp, &w->lbl_rtp);
+        grid_row(g, r++, "tWTRS", NULL, &w->lbl_wtrs);
+        grid_row(g, r++, "tWTRL", NULL, &w->lbl_wtrl);
+        grid_row(g, r++, "tRDWR", NULL, &w->lbl_rdwr);
+        grid_row(g, r++, "tWRRD", NULL, &w->lbl_wrrd);
+        grid_row(g, r++, "tRDRDSC", NULL, &w->lbl_rdrd_sc);
+        grid_row(g, r++, "tRDRDSD", NULL, &w->lbl_rdrd_sd);
+        grid_row(g, r++, "tRDRDDD", NULL, &w->lbl_rdrd_dd);
+        grid_row(g, r++, "tWRWRSC", NULL, &w->lbl_wrwr_sc);
+        grid_row(g, r++, "tWRWRSD", NULL, &w->lbl_wrwr_sd);
+        grid_row(g, r++, "tWRWRDD", NULL, &w->lbl_wrwr_dd);
+        grid_row(g, r++, "tREFI", NULL, &w->lbl_refi);
+        grid_row(g, r++, "tREFI (ns)", NULL, &w->lbl_trefi_ns);
+        grid_row(g, r++, "tWRPRE", NULL, &w->lbl_wrpre);
+        grid_row(g, r++, "tRDPRE", NULL, &w->lbl_rdpre);
+        /* Intel-only secondary rows (hidden on AMD) */
+        grid_row(g, r++, "tREFIx9", &w->row_lbl_refi_x9, &w->lbl_refi_x9);
+        grid_row(g, r++, "tXSR",    &w->row_lbl_txsr,    &w->lbl_txsr);
         gtk_box_append(GTK_BOX(sec_box), g);
     }
     gtk_box_append(GTK_BOX(mid), sec_box);
@@ -258,25 +270,34 @@ static GtkWidget *build_ram_tab(app_widgets_t *w)
     /* Tertiary */
     GtkWidget *tert_box = make_section_box();
     {
-        gtk_box_append(GTK_BOX(tert_box), make_label("Tertiary Timings", "section-title"));
+        w->lbl_section_tertiary = make_label("Tertiary Timings", "section-title");
+        gtk_box_append(GTK_BOX(tert_box), w->lbl_section_tertiary);
         GtkWidget *g = gtk_grid_new();
         gtk_grid_set_row_spacing(GTK_GRID(g), 2);
         gtk_grid_set_column_spacing(GTK_GRID(g), 8);
         int r = 0;
-        grid_row(g, r++, "tRDRDSCL", &w->lbl_rdrd_scl);
-        grid_row(g, r++, "tWRWRSCL", &w->lbl_wrwr_scl);
-        grid_row(g, r++, "tCKE", &w->lbl_cke);
-        grid_row(g, r++, "tXP", &w->lbl_xp);
-        grid_row(g, r++, "tTRCPAGE", &w->lbl_trc_page);
-        grid_row(g, r++, "tMOD", &w->lbl_mod);
-        grid_row(g, r++, "tMODPDA", &w->lbl_mod_pda);
-        grid_row(g, r++, "tMRD", &w->lbl_mrd);
-        grid_row(g, r++, "tMRDPDA", &w->lbl_mrd_pda);
-        grid_row(g, r++, "tSTAG", &w->lbl_stag);
-        grid_row(g, r++, "tSTAGsb", &w->lbl_stag_sb);
-        grid_row(g, r++, "tPHYWRL", &w->lbl_phy_wrl);
-        grid_row(g, r++, "tPHYRDL", &w->lbl_phy_rdl);
-        grid_row(g, r++, "tPHYWRD", &w->lbl_phy_wrd);
+        grid_row(g, r++, "tRDRDSCL", &w->row_lbl_rdrd_scl, &w->lbl_rdrd_scl);
+        grid_row(g, r++, "tWRWRSCL", &w->row_lbl_wrwr_scl, &w->lbl_wrwr_scl);
+        grid_row(g, r++, "tCKE",     NULL,                  &w->lbl_cke);
+        grid_row(g, r++, "tXP",      NULL,                  &w->lbl_xp);
+        /* Intel-only power-down timing rows (hidden on AMD) */
+        grid_row(g, r++, "tXPDLL",   &w->row_lbl_xp_dll,  &w->lbl_xp_dll);
+        grid_row(g, r++, "tRDPDEN",  &w->row_lbl_rdpden,  &w->lbl_rdpden);
+        grid_row(g, r++, "tWRPDEN",  &w->row_lbl_wrpden,  &w->lbl_wrpden);
+        grid_row(g, r++, "tPRPDEN",  &w->row_lbl_prpden,  &w->lbl_prpden);
+        grid_row(g, r++, "tCPDED",   &w->row_lbl_cpded,   &w->lbl_cpded);
+        grid_row(g, r++, "tCSL",     &w->row_lbl_tcsl,    &w->lbl_tcsl);
+        grid_row(g, r++, "tCSH",     &w->row_lbl_tcsh,    &w->lbl_tcsh);
+        grid_row(g, r++, "tTRCPAGE", &w->row_lbl_trc_page,  &w->lbl_trc_page);
+        grid_row(g, r++, "tMOD",     &w->row_lbl_mod,        &w->lbl_mod);
+        grid_row(g, r++, "tMODPDA",  &w->row_lbl_mod_pda,    &w->lbl_mod_pda);
+        grid_row(g, r++, "tMRD",     &w->row_lbl_mrd,        &w->lbl_mrd);
+        grid_row(g, r++, "tMRDPDA",  &w->row_lbl_mrd_pda,    &w->lbl_mrd_pda);
+        grid_row(g, r++, "tSTAG",    &w->row_lbl_stag,       &w->lbl_stag);
+        grid_row(g, r++, "tSTAGsb",  &w->row_lbl_stag_sb,    &w->lbl_stag_sb);
+        grid_row(g, r++, "tPHYWRL",  &w->row_lbl_phy_wrl,    &w->lbl_phy_wrl);
+        grid_row(g, r++, "tPHYRDL",  &w->row_lbl_phy_rdl,    &w->lbl_phy_rdl);
+        grid_row(g, r++, "tPHYWRD",  &w->row_lbl_phy_wrd,    &w->lbl_phy_wrd);
         gtk_box_append(GTK_BOX(tert_box), g);
     }
     gtk_box_append(GTK_BOX(mid), tert_box);
@@ -347,10 +368,111 @@ static void refresh_ui(app_widgets_t *w)
     const smu_metrics_t *m = &s->metrics;
     const dram_timings_t *d = &s->dram;
 
+    cpu_vendor_t vendor = s->cpu.vendor;
+
+    /* Relabel and show/hide vendor-specific rows when vendor changes */
+    if (vendor != w->last_vendor) {
+        gboolean amd = (vendor != CPU_VENDOR_INTEL);
+
+        if (vendor == CPU_VENDOR_INTEL) {
+            set_label_text(w->row_lbl_vsoc,     "SA Voltage");
+            set_label_text(w->row_lbl_vddp,     "VDDQ TX");
+            set_label_text(w->row_lbl_vddg_ccd, "VccDD2");
+        } else {
+            set_label_text(w->row_lbl_vsoc,     "VSOC");
+            set_label_text(w->row_lbl_vddp,     "CLDO VDDP");
+            set_label_text(w->row_lbl_vddg_ccd, "VDDG CCD");
+        }
+
+        /* AMD-only voltage rows */
+        gtk_widget_set_visible(w->row_lbl_vddg_iod,  amd);
+        gtk_widget_set_visible(w->lbl_vddg_iod,      amd);
+        gtk_widget_set_visible(w->row_lbl_vdd_misc,  amd);
+        gtk_widget_set_visible(w->lbl_vdd_misc,      amd);
+        gtk_widget_set_visible(w->row_lbl_mem_vdd,   amd);
+        gtk_widget_set_visible(w->lbl_mem_vdd,       amd);
+        gtk_widget_set_visible(w->row_lbl_mem_vddq,  amd);
+        gtk_widget_set_visible(w->lbl_mem_vddq,      amd);
+        gtk_widget_set_visible(w->row_lbl_cpu_vddio, amd);
+        gtk_widget_set_visible(w->lbl_cpu_vddio,     amd);
+        gtk_widget_set_visible(w->row_lbl_mem_vpp,   amd);
+        gtk_widget_set_visible(w->lbl_mem_vpp,       amd);
+
+        /* AMD-only primary timing rows */
+        gtk_widget_set_visible(w->row_lbl_rfc2, amd);
+        gtk_widget_set_visible(w->lbl_rfc2,     amd);
+
+        /* AMD-only secondary timing rows */
+        gtk_widget_set_visible(w->row_lbl_rtp, amd);
+        gtk_widget_set_visible(w->lbl_rtp,     amd);
+
+        /* AMD-only tertiary timing rows */
+        gtk_widget_set_visible(w->row_lbl_rdrd_scl, amd);
+        gtk_widget_set_visible(w->lbl_rdrd_scl,     amd);
+        gtk_widget_set_visible(w->row_lbl_wrwr_scl, amd);
+        gtk_widget_set_visible(w->lbl_wrwr_scl,     amd);
+        gtk_widget_set_visible(w->row_lbl_trc_page, amd);
+        gtk_widget_set_visible(w->lbl_trc_page,     amd);
+        gtk_widget_set_visible(w->row_lbl_mod,      amd);
+        gtk_widget_set_visible(w->lbl_mod,           amd);
+        gtk_widget_set_visible(w->row_lbl_mod_pda,  amd);
+        gtk_widget_set_visible(w->lbl_mod_pda,       amd);
+        gtk_widget_set_visible(w->row_lbl_mrd,      amd);
+        gtk_widget_set_visible(w->lbl_mrd,           amd);
+        gtk_widget_set_visible(w->row_lbl_mrd_pda,  amd);
+        gtk_widget_set_visible(w->lbl_mrd_pda,       amd);
+        gtk_widget_set_visible(w->row_lbl_stag,     amd);
+        gtk_widget_set_visible(w->lbl_stag,          amd);
+        gtk_widget_set_visible(w->row_lbl_stag_sb,  amd);
+        gtk_widget_set_visible(w->lbl_stag_sb,       amd);
+        gtk_widget_set_visible(w->row_lbl_phy_wrl,  amd);
+        gtk_widget_set_visible(w->lbl_phy_wrl,       amd);
+        gtk_widget_set_visible(w->row_lbl_phy_rdl,  amd);
+        gtk_widget_set_visible(w->lbl_phy_rdl,       amd);
+        gtk_widget_set_visible(w->row_lbl_phy_wrd,      amd);
+        gtk_widget_set_visible(w->lbl_phy_wrd,           amd);
+
+        /* Intel-only row in DIMM info section */
+        gtk_widget_set_visible(w->row_lbl_intel_gear, !amd);
+        gtk_widget_set_visible(w->lbl_intel_gear,     !amd);
+
+        /* Intel-only timing rows */
+        gtk_widget_set_visible(w->row_lbl_trtl,    !amd);
+        gtk_widget_set_visible(w->lbl_trtl,         !amd);
+        gtk_widget_set_visible(w->row_lbl_tppd,    !amd);
+        gtk_widget_set_visible(w->lbl_tppd,         !amd);
+        gtk_widget_set_visible(w->row_lbl_refsbrd, !amd);
+        gtk_widget_set_visible(w->lbl_refsbrd,      !amd);
+        gtk_widget_set_visible(w->row_lbl_refi_x9, !amd);
+        gtk_widget_set_visible(w->lbl_refi_x9,      !amd);
+        gtk_widget_set_visible(w->row_lbl_txsr,    !amd);
+        gtk_widget_set_visible(w->lbl_txsr,         !amd);
+        gtk_widget_set_visible(w->row_lbl_xp_dll,  !amd);
+        gtk_widget_set_visible(w->lbl_xp_dll,       !amd);
+        gtk_widget_set_visible(w->row_lbl_rdpden,  !amd);
+        gtk_widget_set_visible(w->lbl_rdpden,       !amd);
+        gtk_widget_set_visible(w->row_lbl_wrpden,  !amd);
+        gtk_widget_set_visible(w->lbl_wrpden,       !amd);
+        gtk_widget_set_visible(w->row_lbl_prpden,  !amd);
+        gtk_widget_set_visible(w->lbl_prpden,       !amd);
+        gtk_widget_set_visible(w->row_lbl_cpded,   !amd);
+        gtk_widget_set_visible(w->lbl_cpded,        !amd);
+        gtk_widget_set_visible(w->row_lbl_tcsl,    !amd);
+        gtk_widget_set_visible(w->lbl_tcsl,         !amd);
+        gtk_widget_set_visible(w->row_lbl_tcsh,    !amd);
+        gtk_widget_set_visible(w->lbl_tcsh,         !amd);
+
+        w->last_vendor = vendor;
+    }
+
     /* Header */
     set_label_text(w->lbl_cpu_name, s->cpu.processor_name[0] ? s->cpu.processor_name : s->cpu.name);
-    set_label_fmt(w->lbl_codename, "%s  ·  SMU %s  ·  PM %s",
-                  s->cpu.codename, s->cpu.smu_version, s->cpu.pm_table_version);
+    if (vendor == CPU_VENDOR_INTEL)
+        set_label_fmt(w->lbl_codename, "%s  ·  Microcode %s",
+                      s->cpu.codename, s->cpu.microcode_version);
+    else
+        set_label_fmt(w->lbl_codename, "%s  ·  SMU %s  ·  PM %s",
+                      s->cpu.codename, s->cpu.smu_version, s->cpu.pm_table_version);
     set_label_text(w->lbl_board_info, s->board.display_line);
 
     /* Module dropdown — populate once */
@@ -375,12 +497,17 @@ static void refresh_ui(app_widgets_t *w)
     set_label_fmt(w->lbl_fclk, "%.0f MHz", m->fclk_mhz);
     set_label_fmt(w->lbl_uclk, "%.0f MHz", m->uclk_mhz);
     set_label_fmt(w->lbl_bclk, "%.1f MHz", m->bclk_mhz);
-    set_label_text(w->lbl_gdm, d->gdm_enabled ? "True" : "False");
-    set_label_text(w->lbl_powerdown, d->power_down_enabled ? "True" : "False");
+    if (vendor == CPU_VENDOR_INTEL) {
+        set_label_text(w->lbl_gdm,       "—");
+        set_label_text(w->lbl_powerdown, "—");
+    } else {
+        set_label_text(w->lbl_gdm,       d->gdm_enabled ? "True" : "False");
+        set_label_text(w->lbl_powerdown, d->power_down_enabled ? "True" : "False");
+    }
 
     /* SPD temp */
     if (mi >= 0 && mi < m->spd_temps_count)
-        set_label_fmt(w->lbl_spd_temp, "%.1f °C", m->spd_temps_c[mi]);
+        set_label_fmt(w->lbl_spd_temp, "%.1f\u00B0C", m->spd_temps_c[mi]);
     else
         set_label_text(w->lbl_spd_temp, "—");
 
@@ -396,18 +523,37 @@ static void refresh_ui(app_widgets_t *w)
     }
     set_label_text(w->lbl_cmd2t, d->cmd2t[0] ? d->cmd2t : "—");
 
-    /* Voltages */
-    set_label_fmt(w->lbl_vsoc, "%.4fV", m->vsoc);
-    set_label_fmt(w->lbl_vddp, "%.4fV", m->vddp);
-    set_label_fmt(w->lbl_vddg_ccd, "%.4fV", m->vddg_ccd);
-    set_label_fmt(w->lbl_vddg_iod, "%.4fV", m->vddg_iod);
-    set_label_fmt(w->lbl_vdd_misc, "%.4fV", m->vdd_misc);
-    set_label_fmt(w->lbl_mem_vdd, "%.4fV", m->mem_vdd);
+    /* Voltages — Intel and AMD diverge for top 3 rows */
+    if (vendor == CPU_VENDOR_INTEL) {
+        if (m->intel_sa_voltage > 0)
+            set_label_fmt(w->lbl_vsoc,    "%.4fV", m->intel_sa_voltage);
+        else
+            set_label_text(w->lbl_vsoc,   "N/A");
+        if (m->intel_vddq_tx > 0)
+            set_label_fmt(w->lbl_vddp,    "%.4fV", m->intel_vddq_tx);
+        else
+            set_label_text(w->lbl_vddp,   "N/A");
+        if (m->intel_vccdd2 > 0)
+            set_label_fmt(w->lbl_vddg_ccd, "%.4fV", m->intel_vccdd2);
+        else
+            set_label_text(w->lbl_vddg_ccd, "N/A");
+        set_label_text(w->lbl_vddg_iod, "—");
+        set_label_text(w->lbl_vdd_misc, "—");
+        set_label_text(w->lbl_cpu_vddio, "—");
+        set_label_text(w->lbl_vcore, "—");
+    } else {
+        set_label_fmt(w->lbl_vsoc,     "%.4fV", m->vsoc);
+        set_label_fmt(w->lbl_vddp,     "%.4fV", m->vddp);
+        set_label_fmt(w->lbl_vddg_ccd, "%.4fV", m->vddg_ccd);
+        set_label_fmt(w->lbl_vddg_iod, "%.4fV", m->vddg_iod);
+        set_label_fmt(w->lbl_vdd_misc, "%.4fV", m->vdd_misc);
+        set_label_fmt(w->lbl_cpu_vddio, "%.4fV", m->cpu_vddio);
+        set_label_fmt(w->lbl_vcore,    "%.4fV", m->vcore);
+    }
+    set_label_fmt(w->lbl_mem_vdd,  "%.4fV", m->mem_vdd);
     set_label_fmt(w->lbl_mem_vddq, "%.4fV", m->mem_vddq);
-    set_label_fmt(w->lbl_cpu_vddio, "%.4fV", m->cpu_vddio);
-    set_label_fmt(w->lbl_mem_vpp, "%.4fV", m->mem_vpp);
-    set_label_fmt(w->lbl_vcore, "%.4fV", m->vcore);
-    set_label_fmt(w->lbl_ppt, "%.1fW", m->ppt_w);
+    set_label_fmt(w->lbl_mem_vpp,  "%.4fV", m->mem_vpp);
+    set_label_fmt(w->lbl_ppt,      "%.1fW",  m->ppt_w);
 
     /* Primary timings */
     set_label_fmt(w->lbl_tcl, "%u", d->tcl);
@@ -425,6 +571,25 @@ static void refresh_ui(app_widgets_t *w)
     set_label_fmt(w->lbl_rfc, "%u", d->rfc);
     set_label_fmt(w->lbl_rfc2, "%u", d->rfc2);
     set_label_fmt(w->lbl_rfcsb, "%u", d->rfcsb);
+    /* Intel-specific */
+    if (vendor == CPU_VENDOR_INTEL) {
+        /* Per-rank RTL: show as "R0/R1/R2/R3" */
+        if (d->trtl_rank_count > 1) {
+            char rtl_buf[64];
+            int off = 0;
+            for (int i = 0; i < d->trtl_rank_count && i < 8; i++) {
+                if (i > 0) rtl_buf[off++] = '/';
+                off += snprintf(rtl_buf + off, sizeof(rtl_buf) - off,
+                                "%u", d->trtl_per_rank[i]);
+            }
+            set_label_text(w->lbl_trtl, rtl_buf);
+        } else {
+            set_label_fmt(w->lbl_trtl, "%u", d->trtl);
+        }
+        set_label_fmt(w->lbl_intel_gear, "%u", d->intel_gear);
+        set_label_fmt(w->lbl_tppd,    "%u", d->tppd);
+        set_label_fmt(w->lbl_refsbrd, "%u", d->refsbrd);
+    }
 
     /* Secondary timings */
     set_label_fmt(w->lbl_rtp, "%u", d->rtp);
@@ -442,26 +607,39 @@ static void refresh_ui(app_widgets_t *w)
     set_label_fmt(w->lbl_trefi_ns, "%.0f", d->trefi_ns);
     set_label_fmt(w->lbl_wrpre, "%u", d->wrpre);
     set_label_fmt(w->lbl_rdpre, "%u", d->rdpre);
+    if (vendor == CPU_VENDOR_INTEL) {
+        set_label_fmt(w->lbl_refi_x9, "%u", d->refi_x9);
+        set_label_fmt(w->lbl_txsr,    "%u", d->txsr);
+    }
 
-    /* Tertiary timings */
+    /* Tertiary timings (AMD-only rows are hidden via visibility; always update value) */
     set_label_fmt(w->lbl_rdrd_scl, "%u", d->rdrd_scl);
     set_label_fmt(w->lbl_wrwr_scl, "%u", d->wrwr_scl);
-    set_label_fmt(w->lbl_cke, "%u", d->cke);
-    set_label_fmt(w->lbl_xp, "%u", d->xp);
+    set_label_fmt(w->lbl_cke,      "%u", d->cke);
+    set_label_fmt(w->lbl_xp,       "%u", d->xp);
+    if (vendor == CPU_VENDOR_INTEL) {
+        set_label_fmt(w->lbl_xp_dll,  "%u", d->xp_dll);
+        set_label_fmt(w->lbl_rdpden,  "%u", d->rdpden);
+        set_label_fmt(w->lbl_wrpden,  "%u", d->wrpden);
+        set_label_fmt(w->lbl_prpden,  "%u", d->prpden);
+        set_label_fmt(w->lbl_cpded,   "%u", d->cpded);
+        set_label_fmt(w->lbl_tcsl,    "%u", d->tcsl);
+        set_label_fmt(w->lbl_tcsh,    "%u", d->tcsh);
+    }
     set_label_fmt(w->lbl_trc_page, "%u", d->trc_page);
-    set_label_fmt(w->lbl_mod, "%u", d->mod);
-    set_label_fmt(w->lbl_mod_pda, "%u", d->mod_pda);
-    set_label_fmt(w->lbl_mrd, "%u", d->mrd);
-    set_label_fmt(w->lbl_mrd_pda, "%u", d->mrd_pda);
-    set_label_fmt(w->lbl_stag, "%u", d->stag);
-    set_label_fmt(w->lbl_stag_sb, "%u", d->stag_sb);
-    set_label_fmt(w->lbl_phy_wrl, "%u", d->phy_wrl);
+    set_label_fmt(w->lbl_mod,      "%u", d->mod);
+    set_label_fmt(w->lbl_mod_pda,  "%u", d->mod_pda);
+    set_label_fmt(w->lbl_mrd,      "%u", d->mrd);
+    set_label_fmt(w->lbl_mrd_pda,  "%u", d->mrd_pda);
+    set_label_fmt(w->lbl_stag,     "%u", d->stag);
+    set_label_fmt(w->lbl_stag_sb,  "%u", d->stag_sb);
+    set_label_fmt(w->lbl_phy_wrl,  "%u", d->phy_wrl);
     /* PhyRdl: per-channel if available */
     if (mi >= 0 && mi < d->phy_rdl_channel_count)
         set_label_fmt(w->lbl_phy_rdl, "%u", d->phy_rdl_per_channel[mi]);
     else
         set_label_fmt(w->lbl_phy_rdl, "%u", d->phy_rdl);
-    set_label_fmt(w->lbl_phy_wrd, "%u", d->phy_wrd);
+    set_label_fmt(w->lbl_phy_wrd,  "%u", d->phy_wrd);
 
     /* Footer mem type */
     const char *mem_str = s->memory.type == MEM_DDR5 ? "DDR5" :

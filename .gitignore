@@ -28,3 +28,4 @@ pm_table_dump.txt
 # AppImage build outputs (built AppImage, not the tool)
 Linux/TuxTimings-*.AppImage
 Linux/appimagetool-*.AppImage
+pyhwinfo/

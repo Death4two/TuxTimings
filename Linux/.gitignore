@@ -25,3 +25,12 @@ deb-build/
 publish/
 bin/
 obj/
+
+docs/
+
+# Editor / IDE artifacts
+compile_commands.json
+.cache/
+*.d
+*.bak
+*.orig

@@ -2,6 +2,7 @@
 #include "pm_table.h"
 #include "dram.h"
 #include "util.h"
+#include "intel.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,9 +11,25 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/stat.h>
-#include <libcpuid/libcpuid.h>
+
+/* GCC conservatively warns about format truncation for sysfs path buffers
+ * because it can't statically bound hwmon directory name lengths. All path
+ * buffers here are 640 bytes — more than sufficient for any sysfs path. */
+#pragma GCC diagnostic ignored "-Wformat-truncation"
 
 #define SMU_PATH "/sys/kernel/ryzen_smu_drv"
+
+/* system() is marked warn_unused_result in glibc; we genuinely don't care
+ * about the exit code for best-effort modprobe/shell calls. */
+static void run_shell(const char *cmd)
+{
+    int r = system(cmd);
+    (void)r;
+}
+
+/* ── Intel detection state ──────────────────────────────────────────── */
+static int        s_is_intel  = -1;   /* -1 = not yet detected */
+static intel_gen_t s_intel_gen = INTEL_GEN_UNKNOWN;
 
 /* ── Cached static data ─────────────────────────────────────────────── */
 static int  s_cached_static = 0;
@@ -872,6 +889,11 @@ static int read_pm_table_raw(float **out_floats, int *out_count)
 
 int backend_is_supported(void)
 {
+    /* Intel path: always available (uses /proc/cpuinfo + /dev/mem) */
+    cpu_info_t probe;
+    memset(&probe, 0, sizeof(probe));
+    if (intel_detect_cpu(&probe)) return 1;
+    /* AMD path: requires ryzen_smu */
     char path[512];
     snprintf(path, sizeof(path), "%s/version", SMU_PATH);
     return file_exists(path);
@@ -881,17 +903,26 @@ void backend_read_summary(system_summary_t *out)
 {
     memset(out, 0, sizeof(*out));
 
-    /* Load kernel modules and cache static data on first call */
+    /* Detect CPU vendor and load kernel modules on first call */
     if (!s_cached_static) {
+        /* Detect vendor first so we can skip ryzen_smu on Intel */
+        cpu_info_t probe;
+        memset(&probe, 0, sizeof(probe));
+        s_is_intel = intel_detect_cpu(&probe);
+        if (s_is_intel) s_intel_gen = probe.intel_gen;
+
         /* Use absolute path — pkexec strips PATH */
         const char *mp = access("/usr/bin/modprobe", X_OK) == 0 ? "/usr/bin/modprobe" :
                          access("/sbin/modprobe",    X_OK) == 0 ? "/sbin/modprobe"    :
                                                                    "modprobe";
         char cmd[256];
         snprintf(cmd, sizeof(cmd), "%s msr 2>/dev/null", mp);
-        (void)system(cmd);
-        snprintf(cmd, sizeof(cmd), "%s ryzen_smu 2>/dev/null", mp);
-        (void)system(cmd);
+        run_shell(cmd);
+
+        if (!s_is_intel) {
+            snprintf(cmd, sizeof(cmd), "%s ryzen_smu 2>/dev/null", mp);
+            run_shell(cmd);
+        }
 
         /* Load nct6775 if no Nuvoton hwmon driver is active.
          * Covers NCT6775F/6776F/6779D/6791D/6792D/6793D/
@@ -900,18 +931,73 @@ void backend_read_summary(system_summary_t *out)
             char hwmon_path[640];
             if (!find_hwmon_by_name("nct6", hwmon_path, sizeof(hwmon_path))) {
                 snprintf(cmd, sizeof(cmd), "%s nct6775 2>/dev/null", mp);
-                (void)system(cmd);
+                run_shell(cmd);
             }
         }
 
         parse_dmidecode_processor();
         parse_dmidecode_board();
         parse_dmidecode_memory();
-        read_agesa_version();
+        if (!s_is_intel)
+            read_agesa_version();
         s_cached_static = 1;
     }
 
-    /* CPU info */
+    /* ── Intel path ──────────────────────────────────────────────────── */
+    if (s_is_intel) {
+        intel_detect_cpu(&out->cpu);   /* repopulate each call */
+        out->cpu.vendor = CPU_VENDOR_INTEL;
+
+        /* Board info */
+        snprintf(out->board.motherboard, STR_LEN, "%s", s_board_product);
+        snprintf(out->board.bios_version, STR_LEN, "%s", s_bios_version);
+        snprintf(out->board.bios_date, STR_SHORT, "%s", s_bios_date);
+        snprintf(out->board.agesa_version, STR_LEN, "%s", out->cpu.microcode_version);
+        snprintf(out->board.display_line, sizeof(out->board.display_line),
+                 "%s | BIOS %s (%s) | Microcode %s",
+                 s_board_product, s_bios_version, s_bios_date,
+                 out->cpu.microcode_version[0] ? out->cpu.microcode_version : "N/A");
+
+        /* Modules (cached) */
+        out->module_count = s_module_count;
+        memcpy(out->modules, s_modules, s_module_count * sizeof(memory_module_t));
+
+        /* Metrics */
+        intel_read_voltages(&out->metrics);
+        apply_per_core_temps_hwmon(&out->metrics);
+        read_spd_temps(&out->metrics);
+        read_core_usage(&out->metrics);
+        read_core_freq(&out->metrics);
+
+        /* DRAM timings */
+        intel_read_timings(s_intel_gen, &out->dram);
+
+        /* Memory config */
+        out->memory.type = MEM_DDR5;
+        float mem_freq = 0;
+        if (s_module_count > 0 && s_modules[0].clock_speed_mhz > 0)
+            mem_freq = (float)s_modules[0].clock_speed_mhz * 2.0f;
+        out->memory.frequency = mem_freq;
+        read_total_memory(out->memory.total_capacity, sizeof(out->memory.total_capacity));
+
+        /* Part number */
+        char *pn_buf = out->memory.part_number;
+        pn_buf[0] = '\0';
+        for (int i = 0; i < s_module_count; i++) {
+            if (s_modules[i].part_number[0] == '\0') continue;
+            if (strstr(pn_buf, s_modules[i].part_number)) continue;
+            if (pn_buf[0] != '\0') strncat(pn_buf, ", ", STR_LEN - strlen(pn_buf) - 1);
+            strncat(pn_buf, s_modules[i].part_number, STR_LEN - strlen(pn_buf) - 1);
+        }
+
+        /* Fans */
+        read_fans(out->fans, &out->fan_count);
+        return;
+    }
+
+    /* ── AMD path ────────────────────────────────────────────────────── */
+    out->cpu.vendor = CPU_VENDOR_AMD;
+
     int codename_idx = read_codename_index();
     snprintf(out->cpu.name, STR_LEN, "AMD Ryzen (from ryzen_smu)");
     snprintf(out->cpu.processor_name, STR_LEN, "%s", s_processor_name);

@@ -29,6 +29,52 @@ typedef struct {
     GtkWidget *lbl_vdd_misc, *lbl_mem_vdd, *lbl_mem_vddq;
     GtkWidget *lbl_cpu_vddio, *lbl_mem_vpp, *lbl_vcore, *lbl_ppt;
 
+    /* Section title labels (relabeled on Intel) */
+    GtkWidget *lbl_section_voltages;
+    GtkWidget *lbl_section_primary;
+    GtkWidget *lbl_section_secondary;
+    GtkWidget *lbl_section_tertiary;
+
+    /* Voltage row labels that change on Intel */
+    GtkWidget *row_lbl_vsoc;       /* "VSOC"      → "SA Voltage" */
+    GtkWidget *row_lbl_vddp;       /* "CLDO VDDP" → "VDDQ TX"   */
+    GtkWidget *row_lbl_vddg_ccd;   /* "VDDG CCD"  → "VccDD2"    */
+
+    /* AMD-only voltage row labels (hidden on Intel) */
+    GtkWidget *row_lbl_vddg_iod, *row_lbl_vdd_misc;
+    GtkWidget *row_lbl_mem_vdd, *row_lbl_mem_vddq;
+    GtkWidget *row_lbl_cpu_vddio, *row_lbl_mem_vpp;
+
+    /* AMD-only timing row labels (hidden on Intel) */
+    GtkWidget *row_lbl_rfc2;
+    GtkWidget *row_lbl_rtp;
+    GtkWidget *row_lbl_rdrd_scl, *row_lbl_wrwr_scl;
+    GtkWidget *row_lbl_trc_page;
+    GtkWidget *row_lbl_mod, *row_lbl_mod_pda;
+    GtkWidget *row_lbl_mrd, *row_lbl_mrd_pda;
+    GtkWidget *row_lbl_stag, *row_lbl_stag_sb;
+    GtkWidget *row_lbl_phy_wrl, *row_lbl_phy_rdl, *row_lbl_phy_wrd;
+
+    /* Intel-specific timing value labels */
+    GtkWidget *row_lbl_trtl, *lbl_trtl;
+    GtkWidget *row_lbl_intel_gear;
+    GtkWidget *lbl_intel_gear;
+    /* Intel-only extended timing rows (hidden on AMD) */
+    GtkWidget *row_lbl_tppd,    *lbl_tppd;
+    GtkWidget *row_lbl_refsbrd, *lbl_refsbrd;
+    GtkWidget *row_lbl_refi_x9, *lbl_refi_x9;
+    GtkWidget *row_lbl_txsr,    *lbl_txsr;
+    GtkWidget *row_lbl_xp_dll,  *lbl_xp_dll;
+    GtkWidget *row_lbl_rdpden,  *lbl_rdpden;
+    GtkWidget *row_lbl_wrpden,  *lbl_wrpden;
+    GtkWidget *row_lbl_prpden,  *lbl_prpden;
+    GtkWidget *row_lbl_cpded,   *lbl_cpded;
+    GtkWidget *row_lbl_tcsl,    *lbl_tcsl;
+    GtkWidget *row_lbl_tcsh,    *lbl_tcsh;
+
+    /* Vendor tracking for relabel-on-change */
+    cpu_vendor_t last_vendor;
+
     /* RAM tab — Primary timings */
     GtkWidget *lbl_tcl, *lbl_trcd_rd, *lbl_trcd_wr, *lbl_trp, *lbl_tras, *lbl_trc;
     GtkWidget *lbl_trrds, *lbl_trrdl, *lbl_tfaw, *lbl_twr, *lbl_tcwl;
