@@ -17,8 +17,8 @@ static const char *css_data =
     ".header-muted { color: #8B949E; font-size: 12px; }\n"
     ".footer-muted { color: #8B949E; font-size: 11px; }\n"
     ".section-title { color: #C9D1D9; font-size: 13px; font-weight: bold; }\n"
-    ".label { color: #8B949E; font-size: 12px; }\n"
-    ".value-highlight { color: #3FB950; font-size: 12px; }\n"
+    ".label { color: #8B949E; font-size: 12px; min-height: 18px; }\n"
+    ".value-highlight { color: #3FB950; font-size: 12px; min-height: 18px; }\n"
     ".section-box { background-color: #161B22; border-radius: 6px; padding: 6px; }\n"
     "notebook { background: transparent; }\n"
     "notebook > header { background: transparent; border-bottom: 1px solid #30363D; }\n"
@@ -299,43 +299,65 @@ static GtkWidget *build_ram_tab(app_widgets_t *w)
 
 static GtkWidget *build_cpu_tab(app_widgets_t *w)
 {
-    GtkWidget *hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
-    gtk_widget_set_margin_top(hbox, 8);
-    gtk_box_set_homogeneous(GTK_BOX(hbox), TRUE);
+    GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
+    gtk_widget_set_margin_top(vbox, 8);
+    gtk_widget_set_margin_start(vbox, 8);
+    gtk_widget_set_margin_end(vbox, 8);
+    gtk_widget_set_margin_bottom(vbox, 8);
+    gtk_widget_set_hexpand(vbox, TRUE);
 
-    /* Left: VID & per-core voltage */
-    GtkWidget *left = make_section_box();
-    gtk_box_append(GTK_BOX(left), make_label("VID & per-core voltage", "section-title"));
-    w->lbl_vid_voltages = make_value("—");
-    gtk_label_set_wrap(GTK_LABEL(w->lbl_vid_voltages), TRUE);
-    gtk_box_append(GTK_BOX(left), w->lbl_vid_voltages);
-    gtk_box_append(GTK_BOX(hbox), left);
+    GtkWidget *top = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
+    gtk_widget_set_hexpand(top, TRUE);
+    gtk_box_set_homogeneous(GTK_BOX(top), TRUE);
 
-    /* Right: Temps & fans */
-    GtkWidget *right = make_section_box();
-    gtk_box_append(GTK_BOX(right), make_label("Temp & Fans", "section-title"));
+    /* Left: VID & per-core voltages */
+    GtkWidget *volt_box = make_section_box();
+    {
+        gtk_box_append(GTK_BOX(volt_box), make_label("VID & Core Voltages", "section-title"));
+        GtkWidget *g = gtk_grid_new();
+        gtk_grid_set_row_spacing(GTK_GRID(g), 2);
+        gtk_grid_set_column_spacing(GTK_GRID(g), 8);
+        int r = 0;
+        grid_row(g, r++, "VID:", &w->lbl_vid);
+        for (int i = 0; i < MAX_CORES; i++) {
+            char lbl[8];
+            snprintf(lbl, sizeof(lbl), "C%d:", i);
+            grid_row(g, r++, lbl, &w->lbl_core_volt[i]);
+            w->lbl_core_volt_lbl[i] = gtk_grid_get_child_at(GTK_GRID(g), 0, r - 1);
+            gtk_widget_set_visible(w->lbl_core_volt[i],     FALSE);
+            gtk_widget_set_visible(w->lbl_core_volt_lbl[i], FALSE);
+        }
+        w->cpu_core_volt_rows = 0;
+        gtk_box_append(GTK_BOX(volt_box), g);
+    }
+    gtk_box_append(GTK_BOX(top), volt_box);
 
-    gtk_box_append(GTK_BOX(right), make_label("Core temps / load / freq:", "label"));
-    w->lbl_core_temps = make_value("—");
-    gtk_label_set_wrap(GTK_LABEL(w->lbl_core_temps), TRUE);
-    gtk_box_append(GTK_BOX(right), w->lbl_core_temps);
+    /* Right: Temperatures & Fans */
+    GtkWidget *temp_box = make_section_box();
+    {
+        gtk_box_append(GTK_BOX(temp_box), make_label("Temp & Fans", "section-title"));
+        GtkWidget *g = gtk_grid_new();
+        gtk_grid_set_row_spacing(GTK_GRID(g), 2);
+        gtk_grid_set_column_spacing(GTK_GRID(g), 8);
+        int r = 0;
+        grid_row(g, r++, "Fans:",         &w->lbl_fans);
+        gtk_label_set_wrap(GTK_LABEL(w->lbl_fans), TRUE);
+        gtk_box_append(GTK_BOX(temp_box), g);
 
-    gtk_box_append(GTK_BOX(right), make_label("CCD1 / Die temp:", "label"));
-    w->lbl_tctl_tccd = make_value("—");
-    gtk_label_set_wrap(GTK_LABEL(w->lbl_tctl_tccd), TRUE);
-    gtk_box_append(GTK_BOX(right), w->lbl_tctl_tccd);
+        gtk_box_append(GTK_BOX(temp_box), make_label("Temps:", "label"));
+        w->lbl_tdie = make_value("—");
+        gtk_label_set_wrap(GTK_LABEL(w->lbl_tdie), TRUE);
+        gtk_box_append(GTK_BOX(temp_box), w->lbl_tdie);
 
-    gtk_box_append(GTK_BOX(right), make_label("IOD Hotspot:", "label"));
-    w->lbl_iod_hotspot = make_value("—");
-    gtk_box_append(GTK_BOX(right), w->lbl_iod_hotspot);
+        gtk_box_append(GTK_BOX(temp_box), make_label("Core temps / load / freq:", "label"));
+        w->lbl_core_temps = make_value("—");
+        gtk_label_set_wrap(GTK_LABEL(w->lbl_core_temps), TRUE);
+        gtk_box_append(GTK_BOX(temp_box), w->lbl_core_temps);
+    }
+    gtk_box_append(GTK_BOX(top), temp_box);
+    gtk_box_append(GTK_BOX(vbox), top);
 
-    gtk_box_append(GTK_BOX(right), make_label("Fans:", "label"));
-    w->lbl_fans = make_value("—");
-    gtk_label_set_wrap(GTK_LABEL(w->lbl_fans), TRUE);
-    gtk_box_append(GTK_BOX(right), w->lbl_fans);
-
-    gtk_box_append(GTK_BOX(hbox), right);
-    return hbox;
+    return vbox;
 }
 
 /* ── Refresh data → UI ──────────────────────────────────────────────── */
@@ -472,64 +494,61 @@ static void refresh_ui(app_widgets_t *w)
                           s->memory.type == MEM_DDR4 ? "DDR4" : "—";
     set_label_text(w->lbl_footer_type, mem_str);
 
-    /* CPU tab — VID & voltages */
+    /* CPU tab — VID & per-core voltages */
+    SET_VOLT(w->lbl_vid, m->vid);
     {
-        char buf[2048];
-        int off = 0;
-        if (m->vid > 0)
-            off += snprintf(buf + off, sizeof(buf) - off, "VID: %.4f V\n", m->vid);
-        for (int i = 0; i < m->core_voltages_count && i < MAX_CORES; i++) {
-            if (m->core_voltages[i] > 0)
-                off += snprintf(buf + off, sizeof(buf) - off, "C%d: %.4f V\n", i, m->core_voltages[i]);
+        int count = m->core_voltages_count < MAX_CORES ? m->core_voltages_count : MAX_CORES;
+        for (int i = 0; i < MAX_CORES; i++) {
+            gboolean vis = (i < count);
+            gtk_widget_set_visible(w->lbl_core_volt[i],     vis);
+            gtk_widget_set_visible(w->lbl_core_volt_lbl[i], vis);
+            if (vis) SET_VOLT(w->lbl_core_volt[i], m->core_voltages[i]);
         }
-        if (off == 0) snprintf(buf, sizeof(buf), "—");
-        set_label_text(w->lbl_vid_voltages, buf);
     }
 
-    /* CPU tab — Core temps / load / freq */
+    /* CPU tab — Temperatures (single blob row) */
     {
-        char buf[4096];
-        int off = 0;
+        char tbuf[256];
+        int  toff = 0;
+        if (m->has_tdie)        toff += snprintf(tbuf+toff, sizeof(tbuf)-toff, "Tdie: %.1f\xC2\xB0""C  ", m->tdie_c);
+        if (m->has_tctl)        toff += snprintf(tbuf+toff, sizeof(tbuf)-toff, "Tctl: %.1f\xC2\xB0""C  ", m->tctl_c);
+        if (m->has_tccd1)       toff += snprintf(tbuf+toff, sizeof(tbuf)-toff, "Tccd1: %.1f\xC2\xB0""C  ", m->tccd1_c);
+        if (m->has_tccd2)       toff += snprintf(tbuf+toff, sizeof(tbuf)-toff, "Tccd2: %.1f\xC2\xB0""C  ", m->tccd2_c);
+        if (m->has_iod_hotspot) toff += snprintf(tbuf+toff, sizeof(tbuf)-toff, "IOD: %.1f\xC2\xB0""C", m->iod_hotspot_c);
+        if (toff == 0) snprintf(tbuf, sizeof(tbuf), "—");
+        set_label_text(w->lbl_tdie, tbuf);
+    }
+
+    {
         int count = m->core_temps_count;
         if (m->core_usage_count > count) count = m->core_usage_count;
-        if (m->core_freq_count > count) count = m->core_freq_count;
+        if (m->core_freq_count  > count) count = m->core_freq_count;
         if (count > MAX_CORES) count = MAX_CORES;
-
-        for (int i = 0; i < count; i++) {
-            float temp = (i < m->core_temps_count) ? m->core_temps_c[i] : 0;
-            float usage = (i < m->core_usage_count) ? m->core_usage_pct[i] : 0;
-            float freq = (i < m->core_freq_count) ? m->core_freq_mhz[i] : 0;
-            off += snprintf(buf + off, sizeof(buf) - off,
-                            "C%d: %.1f°C  %.0f%%  %.0f MHz\n", i, temp, usage, freq);
+        if (count == 0) {
+            set_label_text(w->lbl_core_temps, "—");
+        } else {
+            char buf[2048];
+            int  off = 0;
+            for (int i = 0; i < count; i++) {
+                float temp  = (i < m->core_temps_count) ? m->core_temps_c[i]  : 0;
+                float usage = (i < m->core_usage_count) ? m->core_usage_pct[i]: 0;
+                float freq  = (i < m->core_freq_count)  ? m->core_freq_mhz[i] : 0;
+                off += snprintf(buf+off, sizeof(buf)-off,
+                                "C%d: %.1f\xC2\xB0""C  %.0f%%  %.0fMHz\n",
+                                i, temp, usage, freq);
+            }
+            /* trim trailing newline */
+            if (off > 0 && buf[off-1] == '\n') buf[off-1] = '\0';
+            set_label_text(w->lbl_core_temps, buf);
         }
-        if (off == 0) snprintf(buf, sizeof(buf), "—");
-        set_label_text(w->lbl_core_temps, buf);
     }
-
-    /* CPU tab — Tctl/Tccd */
-    {
-        char buf[512];
-        int off = 0;
-        if (m->has_tdie) off += snprintf(buf + off, sizeof(buf) - off, "Tdie: %.1f°C  ", m->tdie_c);
-        if (m->has_tctl) off += snprintf(buf + off, sizeof(buf) - off, "Tctl: %.1f°C  ", m->tctl_c);
-        if (m->has_tccd1) off += snprintf(buf + off, sizeof(buf) - off, "Tccd1: %.1f°C  ", m->tccd1_c);
-        if (m->has_tccd2) off += snprintf(buf + off, sizeof(buf) - off, "Tccd2: %.1f°C  ", m->tccd2_c);
-        if (off == 0) snprintf(buf, sizeof(buf), "—");
-        set_label_text(w->lbl_tctl_tccd, buf);
-    }
-
-    /* IOD Hotspot */
-    if (m->has_iod_hotspot)
-        set_label_fmt(w->lbl_iod_hotspot, "%.1f°C", m->iod_hotspot_c);
-    else
-        set_label_text(w->lbl_iod_hotspot, "—");
 
     /* Fans */
     {
         char buf[1024];
         int off = 0;
         for (int i = 0; i < s->fan_count; i++)
-            off += snprintf(buf + off, sizeof(buf) - off, "%s: %d RPM\n", s->fans[i].label, s->fans[i].rpm);
+            off += snprintf(buf + off, sizeof(buf) - off, "%s: %d RPM  ", s->fans[i].label, s->fans[i].rpm);
         if (off == 0) snprintf(buf, sizeof(buf), "—");
         set_label_text(w->lbl_fans, buf);
     }

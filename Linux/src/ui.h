@@ -48,11 +48,17 @@ typedef struct {
     /* RAM tab — Footer */
     GtkWidget *lbl_footer_type;
 
-    /* CPU tab */
-    GtkWidget *lbl_vid_voltages;
+    /* CPU tab — VID & per-core voltages */
+    GtkWidget *lbl_vid;
+    GtkWidget *lbl_core_volt[MAX_CORES];
+    GtkWidget *lbl_core_volt_lbl[MAX_CORES]; /* row label widgets for show/hide */
+    int        cpu_core_volt_rows;
+
+    /* CPU tab — Temperatures (lbl_tdie = single-line temps blob) */
+    GtkWidget *lbl_tdie;
     GtkWidget *lbl_core_temps;
-    GtkWidget *lbl_tctl_tccd;
-    GtkWidget *lbl_iod_hotspot;
+
+    /* CPU tab — Fans */
     GtkWidget *lbl_fans;
 
     /* Data */
