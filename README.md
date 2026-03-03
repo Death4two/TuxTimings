@@ -8,10 +8,12 @@ Zen 5 Granite Ridge (Ryzen 9000-series AM5) is the primary tested target for PM-
 
 ### Prerequisites
 
-- **[ryzen_smu](https://github.com/amkillam/ryzen_smu/)** kernel module — required for all readings. Install before running TuxTimings.
+- **[ryzen_smu](https://github.com/amkillam/ryzen_smu/)** kernel module — required for all readings. TuxTimings will load and unload it automatically if it is installed.
 - **GTK4** runtime (`gtk4` / `libgtk-4-1`) — needed to run the application
 
 > If building manually: also install `gcc`, `make`, `pkg-config`, and GTK4 development headers (`gtk4-devel` / `libgtk-4-dev`). These are handled automatically by `makepkg`.
+
+> **Note:** TuxTimings automatically loads `ryzen_smu` and `aod_voltages` on startup and unloads them on exit. No manual `modprobe` is needed.
 
 ### Installing
 
@@ -24,14 +26,14 @@ yay -S ryzen_smu-dkms-git
 makepkg -si
 ```
 
-This uses the included PKGBUILD to build and install via pacman. The `aod-voltages` kernel module (for memory voltage readings) is bundled and built automatically. Uninstall with `sudo pacman -R tuxtimings`.
+This uses the included PKGBUILD to build and install via pacman. The `aod-voltages` kernel module (for memory voltage readings) is bundled and built automatically via DKMS. Uninstall with `sudo pacman -R tuxtimings`.
 
 #### Ubuntu / Debian
 
 ```bash
 cd Linux
 ./install.sh --deb
-sudo dpkg -i tuxtimings_1.0.2_amd64.deb
+sudo dpkg -i tuxtimings_1.0.3_amd64.deb
 ```
 
 #### Any Linux (direct install)
