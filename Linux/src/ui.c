@@ -6,7 +6,7 @@
 
 /* ── CSS theme (GitHub dark) ────────────────────────────────────────── */
 
-#define APP_VERSION "v1.0.2"
+#define APP_VERSION "v1.0.3"
 
 /* float→double promotion in variadic snprintf calls is harmless here */
 #pragma GCC diagnostic ignored "-Wdouble-promotion"
@@ -396,17 +396,21 @@ static void refresh_ui(app_widgets_t *w)
     }
     set_label_text(w->lbl_cmd2t, d->cmd2t[0] ? d->cmd2t : "—");
 
+/* Helper: show voltage or "—" if unavailable (0) */
+#define SET_VOLT(lbl, val) \
+    ((val) > 0 ? set_label_fmt((lbl), "%.4fV", (val)) : set_label_text((lbl), "—"))
+
     /* Voltages */
-    set_label_fmt(w->lbl_vsoc, "%.4fV", m->vsoc);
-    set_label_fmt(w->lbl_vddp, "%.4fV", m->vddp);
-    set_label_fmt(w->lbl_vddg_ccd, "%.4fV", m->vddg_ccd);
-    set_label_fmt(w->lbl_vddg_iod, "%.4fV", m->vddg_iod);
-    set_label_fmt(w->lbl_vdd_misc, "%.4fV", m->vdd_misc);
-    set_label_fmt(w->lbl_mem_vdd, "%.4fV", m->mem_vdd);
-    set_label_fmt(w->lbl_mem_vddq, "%.4fV", m->mem_vddq);
-    set_label_fmt(w->lbl_cpu_vddio, "%.4fV", m->cpu_vddio);
-    set_label_fmt(w->lbl_mem_vpp, "%.4fV", m->mem_vpp);
-    set_label_fmt(w->lbl_vcore, "%.4fV", m->vcore);
+    SET_VOLT(w->lbl_vsoc,     m->vsoc);
+    SET_VOLT(w->lbl_vddp,     m->vddp);
+    SET_VOLT(w->lbl_vddg_ccd, m->vddg_ccd);
+    SET_VOLT(w->lbl_vddg_iod, m->vddg_iod);
+    SET_VOLT(w->lbl_vdd_misc, m->vdd_misc);
+    SET_VOLT(w->lbl_mem_vdd,  m->mem_vdd);
+    SET_VOLT(w->lbl_mem_vddq, m->mem_vddq);
+    SET_VOLT(w->lbl_cpu_vddio, m->cpu_vddio);
+    SET_VOLT(w->lbl_mem_vpp,  m->mem_vpp);
+    SET_VOLT(w->lbl_vcore,    m->vcore);
     set_label_fmt(w->lbl_ppt, "%.1fW", m->ppt_w);
 
     /* Primary timings */

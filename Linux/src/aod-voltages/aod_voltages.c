@@ -27,7 +27,7 @@
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("TuxTimings");
 MODULE_DESCRIPTION("AMD AOD memory voltage reader");
-MODULE_VERSION("0.1");
+MODULE_VERSION("0.2");
 
 /* AOD SSDT OEM table ID (space-padded to 8 bytes) */
 #define AOD_OEM_ID   "AOD     "
@@ -80,16 +80,19 @@ static struct kobject *aod_kobj;
 /* Module parameters: byte offsets of each voltage in the AODE region.
  * Defaults are the Granite Ridge ZenStates-Core values (AGESA > 0xB404022).
  * Override if scan shows different offsets on your board. */
-static int off_vddio = 9084;
-static int off_vddq  = 9088;
-static int off_vpp   = 9092;
+static int off_vddio     = 9084;
+static int off_vddq      = 9088;
+static int off_vpp       = 9092;
+static int off_cpu_vddio = 9096;
 
 module_param(off_vddio, int, 0644);
-MODULE_PARM_DESC(off_vddio, "Byte offset of MemVddio (VDD) in AOD region");
+MODULE_PARM_DESC(off_vddio,     "Byte offset of MemVddio (VDD) in AOD region");
 module_param(off_vddq, int, 0644);
-MODULE_PARM_DESC(off_vddq,  "Byte offset of MemVddq in AOD region");
+MODULE_PARM_DESC(off_vddq,      "Byte offset of MemVddq in AOD region");
 module_param(off_vpp, int, 0644);
-MODULE_PARM_DESC(off_vpp,   "Byte offset of MemVpp in AOD region");
+MODULE_PARM_DESC(off_vpp,       "Byte offset of MemVpp in AOD region");
+module_param(off_cpu_vddio, int, 0644);
+MODULE_PARM_DESC(off_cpu_vddio, "Byte offset of CPU VDDIO in AOD region (ApuVddio)");
 
 /* Read a u32 millivolt value from the AOD region at byte offset. */
 static u32 read_mv(int offset)
@@ -169,6 +172,9 @@ static ssize_t mem_vddq_show(struct kobject *k, struct kobj_attribute *a, char *
 static ssize_t mem_vpp_show(struct kobject *k, struct kobj_attribute *a, char *b)
 { return show_named(k, a, b, off_vpp); }
 
+static ssize_t cpu_vddio_show(struct kobject *k, struct kobj_attribute *a, char *b)
+{ return show_named(k, a, b, off_cpu_vddio); }
+
 /*
  * raw_wcns — hex dump of WCNS field (offset 8876, 512 bytes).
  * Also dumps OUTB (offset 0, 196 bytes) which holds SMI results.
@@ -208,17 +214,19 @@ static ssize_t raw_wcns_show(struct kobject *kobj,
     return len;
 }
 
-static struct kobj_attribute scan_attr    = __ATTR_RO(scan);
-static struct kobj_attribute vddio_attr   = __ATTR_RO(mem_vddio);
-static struct kobj_attribute vddq_attr    = __ATTR_RO(mem_vddq);
-static struct kobj_attribute vpp_attr     = __ATTR_RO(mem_vpp);
-static struct kobj_attribute wcns_attr    = __ATTR_RO(raw_wcns);
+static struct kobj_attribute scan_attr      = __ATTR_RO(scan);
+static struct kobj_attribute vddio_attr     = __ATTR_RO(mem_vddio);
+static struct kobj_attribute vddq_attr      = __ATTR_RO(mem_vddq);
+static struct kobj_attribute vpp_attr       = __ATTR_RO(mem_vpp);
+static struct kobj_attribute cpu_vddio_attr = __ATTR_RO(cpu_vddio);
+static struct kobj_attribute wcns_attr      = __ATTR_RO(raw_wcns);
 
 static struct attribute *aod_attrs[] = {
     &scan_attr.attr,
     &vddio_attr.attr,
     &vddq_attr.attr,
     &vpp_attr.attr,
+    &cpu_vddio_attr.attr,
     &wcns_attr.attr,
     NULL,
 };

@@ -10,12 +10,24 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <libcpuid/libcpuid.h>
 
 #define SMU_PATH "/sys/kernel/ryzen_smu_drv"
 
+/* GCC conservatively warns about format truncation for sysfs path buffers
+ * because it can't statically bound hwmon directory name lengths. All path
+ * buffers here are 640 bytes — more than sufficient for any sysfs path. */
+#pragma GCC diagnostic ignored "-Wformat-truncation"
+
+/* system() is marked warn_unused_result in glibc; we genuinely don't care
+ * about the exit code for best-effort modprobe/shell calls. */
+static void run_shell(const char *cmd) { int r = system(cmd); (void)r; }
+
 /* ── Cached static data ─────────────────────────────────────────────── */
 static int  s_cached_static = 0;
+static int  s_loaded_aod_voltages = 0;
+static int  s_loaded_ryzen_smu    = 0;
 static char s_processor_name[STR_LEN];
 static char s_board_product[STR_LEN];
 static char s_bios_version[STR_LEN];
@@ -874,6 +886,15 @@ int backend_is_supported(void)
 {
     char path[512];
     snprintf(path, sizeof(path), "%s/version", SMU_PATH);
+    if (file_exists(path)) return 1;
+
+    /* Module may have been unloaded — try loading it now */
+    const char *mp = access("/usr/bin/modprobe", X_OK) == 0 ? "/usr/bin/modprobe" :
+                     access("/sbin/modprobe",    X_OK) == 0 ? "/sbin/modprobe"    :
+                                                               "modprobe";
+    char cmd[256];
+    snprintf(cmd, sizeof(cmd), "%s ryzen_smu 2>/dev/null", mp);
+    run_shell(cmd);
     return file_exists(path);
 }
 
@@ -889,9 +910,18 @@ void backend_read_summary(system_summary_t *out)
                                                                    "modprobe";
         char cmd[256];
         snprintf(cmd, sizeof(cmd), "%s msr 2>/dev/null", mp);
-        (void)system(cmd);
+        run_shell(cmd);
         snprintf(cmd, sizeof(cmd), "%s ryzen_smu 2>/dev/null", mp);
-        (void)system(cmd);
+        run_shell(cmd);
+        if (!file_exists("/sys/kernel/aod_voltages/mem_vddio")) {
+            snprintf(cmd, sizeof(cmd), "%s aod_voltages 2>/dev/null", mp);
+            run_shell(cmd);
+        }
+        /* Always unload on exit — these modules are only useful while the app runs */
+        if (file_exists("/sys/kernel/aod_voltages/mem_vddio"))
+            s_loaded_aod_voltages = 1;
+        if (file_exists("/sys/kernel/ryzen_smu_drv/version"))
+            s_loaded_ryzen_smu = 1;
 
         /* Load nct6775 if no Nuvoton hwmon driver is active.
          * Covers NCT6775F/6776F/6779D/6791D/6792D/6793D/
@@ -900,7 +930,7 @@ void backend_read_summary(system_summary_t *out)
             char hwmon_path[640];
             if (!find_hwmon_by_name("nct6", hwmon_path, sizeof(hwmon_path))) {
                 snprintf(cmd, sizeof(cmd), "%s nct6775 2>/dev/null", mp);
-                (void)system(cmd);
+                run_shell(cmd);
             }
         }
 
@@ -951,11 +981,13 @@ void backend_read_summary(system_summary_t *out)
     {
         int mv;
         mv = read_int_file("/sys/kernel/aod_voltages/mem_vddio");
-        if (mv > 500 && mv < 3000) out->metrics.mem_vdd  = mv / 1000.0f;
+        if (mv > 500 && mv < 3000) out->metrics.mem_vdd    = mv / 1000.0f;
         mv = read_int_file("/sys/kernel/aod_voltages/mem_vddq");
-        if (mv > 500 && mv < 3000) out->metrics.mem_vddq = mv / 1000.0f;
+        if (mv > 500 && mv < 3000) out->metrics.mem_vddq   = mv / 1000.0f;
         mv = read_int_file("/sys/kernel/aod_voltages/mem_vpp");
-        if (mv > 500 && mv < 3000) out->metrics.mem_vpp  = mv / 1000.0f;
+        if (mv > 500 && mv < 3000) out->metrics.mem_vpp    = mv / 1000.0f;
+        mv = read_int_file("/sys/kernel/aod_voltages/cpu_vddio");
+        if (mv > 500 && mv < 3000) out->metrics.cpu_vddio  = mv / 1000.0f;
     }
 
     /* hwmon overlays */
@@ -992,4 +1024,35 @@ void backend_read_summary(system_summary_t *out)
 
     /* Fans */
     read_fans(out->fans, &out->fan_count);
+}
+
+static void rmmod_module(const char *rm, const char *module)
+{
+    pid_t pid = fork();
+    if (pid == 0) {
+        int devnull = open("/dev/null", O_WRONLY);
+        if (devnull >= 0) { dup2(devnull, STDERR_FILENO); close(devnull); }
+        execl(rm, rm, module, (char *)NULL);
+        _exit(1);
+    } else if (pid > 0) {
+        waitpid(pid, NULL, 0);
+    }
+}
+
+void backend_cleanup(void)
+{
+    const char *rm = access("/usr/bin/rmmod", X_OK) == 0 ? "/usr/bin/rmmod" :
+                     access("/sbin/rmmod",    X_OK) == 0 ? "/sbin/rmmod"    :
+                                                           "/usr/bin/rmmod";
+
+    /* Use fork+execl: safe from both normal exit and signal handlers.
+     * system()/popen() are not async-signal-safe and silently fail in signals. */
+    if (s_loaded_aod_voltages) {
+        s_loaded_aod_voltages = 0;
+        rmmod_module(rm, "aod_voltages");
+    }
+    if (s_loaded_ryzen_smu) {
+        s_loaded_ryzen_smu = 0;
+        rmmod_module(rm, "ryzen_smu");
+    }
 }

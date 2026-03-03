@@ -10,4 +10,8 @@ int backend_is_supported(void);
  * Static data (dmidecode, AGESA) is cached after first call. */
 void backend_read_summary(system_summary_t *out);
 
+/* Unload any kernel modules that were loaded by backend_read_summary().
+ * Call once on application exit. */
+void backend_cleanup(void);
+
 #endif

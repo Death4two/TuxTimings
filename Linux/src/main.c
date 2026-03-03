@@ -5,6 +5,14 @@
 #include <string.h>
 #include <unistd.h>
 #include <locale.h>
+#include <signal.h>
+
+static void on_signal(int sig)
+{
+    (void)sig;
+    backend_cleanup();
+    _exit(0);
+}
 
 /* ── Restore environment variables from --env-VAR=VALUE args ────────── */
 
@@ -110,6 +118,9 @@ static void elevate_if_necessary(int argc, char **argv)
 
 int main(int argc, char *argv[])
 {
+    signal(SIGTERM, on_signal);
+    signal(SIGINT,  on_signal);
+
     restore_env(&argc, &argv);
     elevate_if_necessary(argc, argv);
 
@@ -125,5 +136,6 @@ int main(int argc, char *argv[])
     GtkApplication *app = ui_create(argc, argv);
     int status = g_application_run(G_APPLICATION(app), argc, argv);
     g_object_unref(app);
+    backend_cleanup();
     return status;
 }
