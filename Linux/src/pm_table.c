@@ -90,6 +90,18 @@ static const pm_family_map_t CEZANNE_400005 = {
     .core_voltage_start = 208, .core_temp_start = 216, .max_cores = 8
 };
 
+/* Raphael 0x540104 (7800X3D 8-core, PM table 0x00540104) */
+static const pm_family_map_t RAPHAEL_540104 = {
+    .named = {
+        {11, F_IOD_HOTSPOT}, {70, F_FCLK}, {78, F_UCLK}, {74, F_MCLK},
+        {82, F_VSOC}, {259, F_VDDG_IOD}, {261, F_VDDG_CCD},
+        {269, F_VDDP}, {271, F_VCORE}
+    },
+    .named_count = 9,
+    .vid_idx = 275, .ppt_idx = 3, .socket_power_idx = 29,
+    .core_voltage_start = 301, .core_temp_start = 309, .max_cores = 8
+};
+
 /* Matisse 0x240903 (3700X/3800X 8-core) */
 static const pm_family_map_t MATISSE_240903 = {
     .named = {
@@ -148,6 +160,7 @@ static const pm_family_map_t RAVEN_1E0004 = {
 static const pm_family_map_t *get_family_map(uint32_t version)
 {
     switch (version) {
+    case 0x540104: return &RAPHAEL_540104;
     case 0x380804: return &VERMEER_380804;
     case 0x380805: return &VERMEER_380805;
     case 0x380904: return &VERMEER_380904;
@@ -192,7 +205,7 @@ static void apply_named(const pm_family_map_t *map, const float *t, int count, s
     }
 }
 
-/* Granite Ridge specific: byte-offset based reading (ZenStates-Core style) */
+/* Granite Ridge specific: byte-offset based reading */
 static void read_granite_ridge_offsets(const float *t, int count, smu_metrics_t *m)
 {
     /* Byte offsets -> float index = offset / 4 */
@@ -236,6 +249,21 @@ static float try_plausible_temp(const float *t, int count)
         if (v >= 1.0f && v <= 150.0f) return v;
     }
     return 0.0f;
+}
+
+/* Derive aggregate core clock in MHz from per-core clocks in GHz */
+static void compute_core_clock_from_clocks(smu_metrics_t *m)
+{
+    if (m->core_clocks_count <= 0) return;
+
+    float max_ghz = 0.0f;
+    for (int i = 0; i < m->core_clocks_count; i++) {
+        float ghz = m->core_clocks_ghz[i];
+        if (ghz > max_ghz)
+            max_ghz = ghz;
+    }
+    if (max_ghz >= 0.5f && max_ghz <= 6.5f)
+        m->core_clock_mhz = max_ghz * 1000.0f;
 }
 
 /* Read known PM table indices for PPT, core temps, core clocks, VID, core voltages */
@@ -305,15 +333,6 @@ void pm_table_read(uint32_t version, const float *table, int count,
         out->package_power_w = try_plausible_power(table, count);
         out->package_current_a = try_plausible_current(table, count);
 
-        /* Core clock: use max from per-core clocks if available */
-        if (out->core_clocks_count > 0) {
-            float max_ghz = 0;
-            for (int i = 0; i < out->core_clocks_count; i++)
-                if (out->core_clocks_ghz[i] > max_ghz) max_ghz = out->core_clocks_ghz[i];
-            if (max_ghz >= 0.5f && max_ghz <= 6.5f)
-                out->core_clock_mhz = max_ghz * 1000.0f;
-        }
-
         if (out->has_tdie && out->tdie_c > 0)
             out->cpu_temp_c = out->tdie_c;
         else
@@ -351,7 +370,15 @@ void pm_table_read(uint32_t version, const float *table, int count,
         out->package_current_a = try_plausible_current(table, count);
         out->cpu_temp_c = try_plausible_temp(table, count);
 
-        /* IOD hotspot from known indices */
-        read_known_indices(table, count, out);
+        /* Raphael (7000-series) per-core clocks and aggregate core clock */
+        if (version == 0x540104 && count > 324) {
+            out->core_clocks_count = 8;
+            for (int i = 0; i < 8; i++) {
+                out->core_clocks_ghz[i] = table[317 + i];
+            }
+        }
     }
+
+    /* Shared aggregation: derive core_clock_mhz from per-core clocks for all families */
+    compute_core_clock_from_clocks(out);
 }

@@ -24,7 +24,11 @@ pkg/
 # Debug/dump output files
 pm_table_dump.txt
 *.dsl
+pm_dumps/
 
 # AppImage build outputs (built AppImage, not the tool)
 Linux/TuxTimings-*.AppImage
 Linux/appimagetool-*.AppImage
+PM_TABLE_INDICES.md
+
+

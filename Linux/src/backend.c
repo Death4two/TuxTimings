@@ -12,6 +12,7 @@
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <libcpuid/libcpuid.h>
+#include <math.h>
 
 #define SMU_PATH "/sys/kernel/ryzen_smu_drv"
 
@@ -456,73 +457,6 @@ static float read_temp_input(const char *hwmon_dir, int index)
     if (raw == 0) return -1.0f;
     float c = raw / 1000.0f;
     return (c >= 0.0f && c <= 150.0f) ? c : -1.0f;
-}
-
-/* ── Zenpower overlay ───────────────────────────────────────────────── */
-
-static void apply_zenpower(smu_metrics_t *m)
-{
-    char zpdir[640];
-    if (!find_hwmon_by_name("zenpower", zpdir, sizeof(zpdir))) return;
-
-    DIR *d = opendir(zpdir);
-    if (!d) return;
-    struct dirent *ent;
-    while ((ent = readdir(d))) {
-        /* voltage inputs: in*_label / in*_input (millivolts) */
-        if (strncmp(ent->d_name, "in", 2) == 0 && strstr(ent->d_name, "_label")) {
-            int idx = 0;
-            if (sscanf(ent->d_name, "in%d_label", &idx) != 1) continue;
-            char lpath[640], vpath[640], label[64];
-            snprintf(lpath, sizeof(lpath), "%s/in%d_label", zpdir, idx);
-            snprintf(vpath, sizeof(vpath), "%s/in%d_input", zpdir, idx);
-            if (!read_file_string(lpath, label, sizeof(label))) continue;
-            /* lower-case */
-            for (char *p = label; *p; p++) *p = (char)tolower((unsigned char)*p);
-            float mv = (float)read_int_file(vpath);
-            if (mv == 0) continue;
-            float v = mv / 1000.0f;
-            if (strstr(label, "vddcr_soc") || strstr(label, "vsoc") || strstr(label, "svi2_soc"))
-                m->vsoc = v;
-            else if (strstr(label, "vddio_mem") || strstr(label, "vddmem") || strstr(label, "mem vdd"))
-                m->mem_vdd = v;
-            else if (strstr(label, "vddq") && strstr(label, "mem"))
-                m->mem_vddq = v;
-            else if (strstr(label, "vpp") && strstr(label, "mem"))
-                m->mem_vpp = v;
-        }
-        /* power: power*_label / power*_input (microwatts) */
-        if (strncmp(ent->d_name, "power", 5) == 0 && strstr(ent->d_name, "_label")) {
-            int idx = 0;
-            if (sscanf(ent->d_name, "power%d_label", &idx) != 1) continue;
-            char lpath[640], vpath[640], label[64];
-            snprintf(lpath, sizeof(lpath), "%s/power%d_label", zpdir, idx);
-            snprintf(vpath, sizeof(vpath), "%s/power%d_input", zpdir, idx);
-            if (!read_file_string(lpath, label, sizeof(label))) continue;
-            for (char *p = label; *p; p++) *p = (char)tolower((unsigned char)*p);
-            float uw = (float)read_int_file(vpath);
-            if (uw == 0) continue;
-            float watts = uw / 1000000.0f;
-            if ((strstr(label, "rapl") || strstr(label, "package")) && watts >= 0.1f && watts <= 500.0f)
-                m->ppt_w = watts;
-        }
-        /* current: curr*_label / curr*_input (milliamps) */
-        if (strncmp(ent->d_name, "curr", 4) == 0 && strstr(ent->d_name, "_label")) {
-            int idx = 0;
-            if (sscanf(ent->d_name, "curr%d_label", &idx) != 1) continue;
-            char lpath[640], vpath[640], label[64];
-            snprintf(lpath, sizeof(lpath), "%s/curr%d_label", zpdir, idx);
-            snprintf(vpath, sizeof(vpath), "%s/curr%d_input", zpdir, idx);
-            if (!read_file_string(lpath, label, sizeof(label))) continue;
-            for (char *p = label; *p; p++) *p = (char)tolower((unsigned char)*p);
-            float ma = (float)read_int_file(vpath);
-            if (ma == 0) continue;
-            float amps = ma / 1000.0f;
-            if ((strstr(label, "core") || strstr(label, "svi2_c_core")) && amps >= 0.01f && amps <= 300.0f)
-                m->package_current_a = amps;
-        }
-    }
-    closedir(d);
 }
 
 /* ── k10temp Tctl/Tccd overlay ──────────────────────────────────────── */
@@ -974,8 +908,10 @@ void backend_read_summary(system_summary_t *out)
         free(pm_floats);
     }
 
-    /* BCLK from MSR */
+    /* BCLK from MSR (fallback to 100 MHz) */
     out->metrics.bclk_mhz = try_read_bclk();
+    if ((out->metrics.bclk_mhz <= 0.0f || isnan(out->metrics.bclk_mhz)) && codename_idx == 20)
+        out->metrics.bclk_mhz = 100.0f;
 
     /* Memory voltages from aod_voltages kernel module sysfs */
     {
@@ -991,7 +927,6 @@ void backend_read_summary(system_summary_t *out)
     }
 
     /* hwmon overlays */
-    apply_zenpower(&out->metrics);
     apply_per_core_temps_hwmon(&out->metrics);
     apply_k10temp_tctl_tccd(&out->metrics);
     read_spd_temps(&out->metrics);
@@ -1096,6 +1031,29 @@ char *backend_read_debug_dump(void)
                 DUMP("  %-14s = %d mV (%.4f V)\n", aod_files[i], mv, mv / 1000.0);
             else
                 DUMP("  %-14s = (unavailable)\n", aod_files[i]);
+        }
+
+        /* Full AOD scan: dump every millivolt-range candidate from the region.
+         * This uses the kernel module's /scan sysfs entry so it works across generations. */
+        if (file_exists("/sys/kernel/aod_voltages/scan")) {
+            DUMP("\n--- AOD scan (/sys/kernel/aod_voltages/scan) ---\n");
+            FILE *sf = fopen("/sys/kernel/aod_voltages/scan", "r");
+            if (sf) {
+                char line[512];
+                while (fgets(line, sizeof(line), sf)) {
+                    DUMP("%s", line);
+                    /* Leave some headroom for later sections if buffer is nearly full */
+                    if (off + 4096 >= cap) {
+                        DUMP("\n... (AOD scan truncated, buffer full)\n");
+                        break;
+                    }
+                }
+                fclose(sf);
+            } else {
+                DUMP("  (failed to read /sys/kernel/aod_voltages/scan)\n");
+            }
+        } else {
+            DUMP("  (scan sysfs entry unavailable — aod_voltages module too old or not loaded)\n");
         }
     }
 
