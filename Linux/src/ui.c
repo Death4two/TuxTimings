@@ -563,6 +563,40 @@ static gboolean on_refresh(gpointer user_data)
     return G_SOURCE_CONTINUE;
 }
 
+/* Debug dump button clicked */
+static void on_debug_dump(GtkButton *btn, gpointer user_data)
+{
+    (void)btn;
+    GtkWidget *parent = GTK_WIDGET(user_data);
+
+    char *text = backend_read_debug_dump();
+    if (!text) text = strdup("(failed to read debug data)");
+
+    GtkWidget *win = gtk_window_new();
+    gtk_window_set_title(GTK_WINDOW(win), "Debug Dump");
+    gtk_window_set_default_size(GTK_WINDOW(win), 700, 600);
+    gtk_window_set_transient_for(GTK_WINDOW(win), GTK_WINDOW(gtk_widget_get_root(parent)));
+    gtk_window_set_modal(GTK_WINDOW(win), FALSE);
+
+    GtkWidget *scroll = gtk_scrolled_window_new();
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll),
+                                   GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
+
+    GtkWidget *tv = gtk_text_view_new();
+    gtk_text_view_set_editable(GTK_TEXT_VIEW(tv), FALSE);
+    gtk_text_view_set_monospace(GTK_TEXT_VIEW(tv), TRUE);
+    gtk_text_view_set_left_margin(GTK_TEXT_VIEW(tv), 8);
+    gtk_text_view_set_right_margin(GTK_TEXT_VIEW(tv), 8);
+    gtk_text_view_set_top_margin(GTK_TEXT_VIEW(tv), 8);
+    GtkTextBuffer *tbuf = gtk_text_view_get_buffer(GTK_TEXT_VIEW(tv));
+    gtk_text_buffer_set_text(tbuf, text, -1);
+    free(text);
+
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), tv);
+    gtk_window_set_child(GTK_WINDOW(win), scroll);
+    gtk_window_present(GTK_WINDOW(win));
+}
+
 /* Module dropdown selection changed */
 static void on_module_changed(GtkDropDown *dropdown, GParamSpec *pspec, gpointer user_data)
 {
@@ -618,6 +652,11 @@ static void on_activate(GtkApplication *app, gpointer user_data)
     gtk_widget_set_size_request(w->combo_modules, 200, -1);
     g_signal_connect(w->combo_modules, "notify::selected", G_CALLBACK(on_module_changed), w);
     gtk_box_append(GTK_BOX(header_top), w->combo_modules);
+
+    GtkWidget *btn_debug = gtk_button_new_with_label("Debug");
+    g_signal_connect(btn_debug, "clicked", G_CALLBACK(on_debug_dump), w->window);
+    gtk_box_append(GTK_BOX(header_top), btn_debug);
+
     gtk_box_append(GTK_BOX(header), header_top);
 
     w->lbl_codename = make_label("", "header-muted");

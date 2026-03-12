@@ -14,4 +14,8 @@ void backend_read_summary(system_summary_t *out);
  * Call once on application exit. */
 void backend_cleanup(void);
 
+/* Returns a malloc'd string with a raw PM table + AOD sysfs debug dump.
+ * Caller must free(). Returns NULL on failure. */
+char *backend_read_debug_dump(void);
+
 #endif

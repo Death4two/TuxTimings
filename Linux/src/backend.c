@@ -1056,3 +1056,72 @@ void backend_cleanup(void)
         rmmod_module(rm, "ryzen_smu");
     }
 }
+
+/* ── Debug dump ─────────────────────────────────────────────────────── */
+
+char *backend_read_debug_dump(void)
+{
+    /* Allocate a large enough buffer (PM table can be ~2000 entries * ~20 chars) */
+    size_t cap = 256 * 1024;
+    char *buf = malloc(cap);
+    if (!buf) return NULL;
+    size_t off = 0;
+
+#define DUMP(fmt, ...) \
+    do { off += (size_t)snprintf(buf + off, cap - off, fmt, ##__VA_ARGS__); } while (0)
+
+    /* ── SMU sysfs values ─────────────────────────────────────────── */
+    DUMP("=== SMU Info ===\n");
+    {
+        char tmp[256];
+        if (read_smu_string("version", tmp, sizeof(tmp)))
+            DUMP("SMU Version:        %s\n", tmp);
+        if (read_smu_string("codename", tmp, sizeof(tmp)))
+            DUMP("Codename:           %s\n", tmp);
+        if (read_smu_string("mp1_if_version", tmp, sizeof(tmp)))
+            DUMP("MP1 IF Version:     %s\n", tmp);
+        uint32_t pm_ver = read_smu_uint32("pm_table_version");
+        if (pm_ver) DUMP("PM Table Version:   0x%08X\n", pm_ver);
+    }
+
+    /* ── AOD sysfs values ─────────────────────────────────────────── */
+    DUMP("\n=== AOD Voltages (/sys/kernel/aod_voltages/) ===\n");
+    {
+        const char *aod_files[] = { "mem_vddio", "mem_vddq", "mem_vpp", "cpu_vddio", NULL };
+        for (int i = 0; aod_files[i]; i++) {
+            char path[128];
+            snprintf(path, sizeof(path), "/sys/kernel/aod_voltages/%s", aod_files[i]);
+            int mv = read_int_file(path);
+            if (mv > 0)
+                DUMP("  %-14s = %d mV (%.4f V)\n", aod_files[i], mv, mv / 1000.0);
+            else
+                DUMP("  %-14s = (unavailable)\n", aod_files[i]);
+        }
+    }
+
+    /* ── PM table raw floats ──────────────────────────────────────── */
+    DUMP("\n=== PM Table Raw Entries ===\n");
+    {
+        float *t = NULL;
+        int count = 0;
+        if (read_pm_table_raw(&t, &count)) {
+            DUMP("Total entries: %d\n\n", count);
+            DUMP("%-8s  %-14s\n", "Index", "Value");
+            DUMP("%-8s  %-14s\n", "-----", "-----");
+            for (int i = 0; i < count; i++) {
+                DUMP("[%4d]    %14.6f\n", i, (double)t[i]);
+                /* Resize guard — leave 4KB headroom */
+                if (off + 4096 >= cap) {
+                    DUMP("\n... (truncated at entry %d, buffer full)\n", i);
+                    break;
+                }
+            }
+            free(t);
+        } else {
+            DUMP("(PM table unavailable)\n");
+        }
+    }
+
+#undef DUMP
+    return buf;
+}
