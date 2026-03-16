@@ -11,7 +11,6 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
-#include <libcpuid/libcpuid.h>
 #include <math.h>
 
 #define SMU_PATH "/sys/kernel/ryzen_smu_drv"
@@ -726,6 +725,49 @@ static void read_core_freq(smu_metrics_t *m)
     m->core_freq_count = max_core;
 }
 
+/* ── BCLK from DMI Type 4 (External Clock field) ───────────────────── */
+
+static float try_read_bclk_dmi(void)
+{
+    /*
+     * DMI Type 4 (Processor Information), offset 0x12: External Clock (MHz, WORD).
+     * This is the BIOS-reported BCLK — exact integer, same source CPU-X uses.
+     * Requires root (binary runs via pkexec).
+     */
+    int fd = open("/sys/firmware/dmi/tables/DMI", O_RDONLY);
+    if (fd < 0) return 0;
+
+    uint8_t buf[65536];
+    ssize_t total = 0, n;
+    while (total < (ssize_t)sizeof(buf) &&
+           (n = read(fd, buf + total, sizeof(buf) - total)) > 0)
+        total += n;
+    close(fd);
+    if (total < 4) return 0;
+
+    int i = 0;
+    while (i < total - 4) {
+        uint8_t type = buf[i];
+        uint8_t len  = buf[i + 1];
+        if (i + len > total) break;
+        if (type == 127) break; /* end-of-table */
+
+        if (type == 4 && len >= 0x14) {
+            uint16_t ext_clk;
+            memcpy(&ext_clk, buf + i + 0x12, sizeof(ext_clk));
+            if (ext_clk >= 80 && ext_clk <= 200)
+                return (float)ext_clk;
+        }
+
+        /* advance past fixed part + string table (ends with double NUL) */
+        int end = i + len;
+        while (end < total - 1 && !(buf[end] == 0 && buf[end + 1] == 0))
+            end++;
+        i = end + 2;
+    }
+    return 0;
+}
+
 /* ── BCLK from MSR ──────────────────────────────────────────────────── */
 
 static int read_p0_msr_fields(uint64_t *cpuFid_out, uint64_t *cpuDfsId_out)
@@ -746,21 +788,41 @@ static int read_p0_msr_fields(uint64_t *cpuFid_out, uint64_t *cpuDfsId_out)
     return 1;
 }
 
+static int read_cpu_family(void)
+{
+    FILE *f = fopen("/proc/cpuinfo", "r");
+    if (!f) return -1;
+    char line[128];
+    int family = -1;
+    while (fgets(line, sizeof(line), f)) {
+        if (sscanf(line, "cpu family : %d", &family) == 1)
+            break;
+    }
+    fclose(f);
+    return family;
+}
+
 static float try_read_bclk(void)
 {
     /*
-     * AMD Zen BCLK derivation:
-     *   MSR 0xC0010064 (P-state 0):
-     *     bits [7:0]  = CpuFid
-     *     bits [13:8] = CpuDfsId
-     *   P0 multiplier = (CpuFid / CpuDfsId) * 2
-     *   BCLK = cpuinfo_max_freq / p0_mult
+     * AMD Zen BCLK derivation via MSR 0xC0010064 (P-state 0):
+     *   bits [7:0]  = CpuFid
+     *   bits [13:8] = CpuDfsId
+     *
+     * Zen1–4 (family 0x17, 0x19): CoreCOF = 200 * CpuFid / CpuDfsId
+     *   → P0 multiplier = 2 * CpuFid / CpuDfsId
+     * Zen5   (family 0x1A):       CoreCOF = 100 * CpuFid / CpuDfsId
+     *   → P0 multiplier = CpuFid / CpuDfsId
+     *
+     * BCLK = cpuinfo_max_freq / p0_mult
      */
     uint64_t cpuFid = 0, cpuDfsId = 0;
     if (!read_p0_msr_fields(&cpuFid, &cpuDfsId)) return 0;
     if (cpuDfsId == 0 || cpuFid == 0) return 0;
 
-    double p0_mult = (double)cpuFid / (double)cpuDfsId;
+    int family = read_cpu_family();
+    double mult_factor = (family == 0x1A) ? 1.0 : 2.0;
+    double p0_mult = ((double)cpuFid / (double)cpuDfsId) * mult_factor;
     if (p0_mult <= 0.1 || p0_mult > 200.0) return 0;
 
     /* Stable reference: kernel-reported max boost frequency */
@@ -908,10 +970,10 @@ void backend_read_summary(system_summary_t *out)
         free(pm_floats);
     }
 
-    /* BCLK from MSR (fallback to 100 MHz) */
-    out->metrics.bclk_mhz = try_read_bclk();
-    if ((out->metrics.bclk_mhz <= 0.0f || isnan(out->metrics.bclk_mhz)) && codename_idx == 20)
-        out->metrics.bclk_mhz = 100.0f;
+    /* BCLK: DMI (exact BIOS value) with MSR as fallback */
+    out->metrics.bclk_mhz = try_read_bclk_dmi();
+    if (out->metrics.bclk_mhz <= 0.0f)
+        out->metrics.bclk_mhz = try_read_bclk();
 
     /* Memory voltages from aod_voltages kernel module sysfs */
     {
@@ -1019,42 +1081,25 @@ char *backend_read_debug_dump(void)
         if (pm_ver) DUMP("PM Table Version:   0x%08X\n", pm_ver);
     }
 
-    /* ── AOD sysfs values ─────────────────────────────────────────── */
-    DUMP("\n=== AOD Voltages (/sys/kernel/aod_voltages/) ===\n");
-    {
-        const char *aod_files[] = { "mem_vddio", "mem_vddq", "mem_vpp", "cpu_vddio", NULL };
-        for (int i = 0; aod_files[i]; i++) {
-            char path[128];
-            snprintf(path, sizeof(path), "/sys/kernel/aod_voltages/%s", aod_files[i]);
-            int mv = read_int_file(path);
-            if (mv > 0)
-                DUMP("  %-14s = %d mV (%.4f V)\n", aod_files[i], mv, mv / 1000.0);
-            else
-                DUMP("  %-14s = (unavailable)\n", aod_files[i]);
-        }
-
-        /* Full AOD scan: dump every millivolt-range candidate from the region.
-         * This uses the kernel module's /scan sysfs entry so it works across generations. */
-        if (file_exists("/sys/kernel/aod_voltages/scan")) {
-            DUMP("\n--- AOD scan (/sys/kernel/aod_voltages/scan) ---\n");
-            FILE *sf = fopen("/sys/kernel/aod_voltages/scan", "r");
-            if (sf) {
-                char line[512];
-                while (fgets(line, sizeof(line), sf)) {
-                    DUMP("%s", line);
-                    /* Leave some headroom for later sections if buffer is nearly full */
-                    if (off + 4096 >= cap) {
-                        DUMP("\n... (AOD scan truncated, buffer full)\n");
-                        break;
-                    }
+    /* ── AOD scan ─────────────────────────────────────────────────── */
+    if (file_exists("/sys/kernel/aod_voltages/scan")) {
+        DUMP("\n--- AOD scan (/sys/kernel/aod_voltages/scan) ---\n");
+        FILE *sf = fopen("/sys/kernel/aod_voltages/scan", "r");
+        if (sf) {
+            char line[512];
+            while (fgets(line, sizeof(line), sf)) {
+                DUMP("%s", line);
+                if (off + 4096 >= cap) {
+                    DUMP("\n... (AOD scan truncated, buffer full)\n");
+                    break;
                 }
-                fclose(sf);
-            } else {
-                DUMP("  (failed to read /sys/kernel/aod_voltages/scan)\n");
             }
+            fclose(sf);
         } else {
-            DUMP("  (scan sysfs entry unavailable — aod_voltages module too old or not loaded)\n");
+            DUMP("  (failed to read /sys/kernel/aod_voltages/scan)\n");
         }
+    } else {
+        DUMP("\n--- AOD scan: unavailable (aod_voltages module not loaded) ---\n");
     }
 
     /* ── PM table raw floats ──────────────────────────────────────── */

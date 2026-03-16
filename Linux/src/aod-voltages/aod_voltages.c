@@ -62,7 +62,7 @@ MODULE_VERSION("0.2");
  * Filter range covers all realistic DDR/CPU rails.
  */
 #define MV_MIN   500U
-#define MV_MAX   3000U
+#define MV_MAX   2100U
 
 /*
  * AML byte pattern for:  OpRegion (AODE, SystemMemory, ...)

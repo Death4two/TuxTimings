@@ -181,7 +181,8 @@ void dram_read_timings(int codename_index, dram_timings_t *out)
     memset(out, 0, sizeof(*out));
     switch (codename_index) {
     case 20: case 21: /* Raphael (Ryzen 7000), Phoenix (Ryzen 7040/8040) — Zen4 DDR5 */
-    case 23: /* Granite Ridge (Ryzen 9000) — Zen5 DDR5 */
+    case 22: case 24: /* Strix Point / Hawk Point — Zen5/Zen4c DDR5 */
+    case 23:          /* Granite Ridge (Ryzen 9000) — Zen5 DDR5 */
         read_ddr5_timings(out);
         break;
     case 4: case 9: case 10: case 12: case 18: case 19:
