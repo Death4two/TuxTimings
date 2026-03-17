@@ -20,7 +20,10 @@ sha256sums=('SKIP')
 
 build() {
     cd "$srcdir/TuxTimings-main/Linux"
-    make clean all
+    # Run clean and build in separate make invocations to avoid
+    # parallel builds (`MAKEFLAGS=-j…`) deleting objects while linking.
+    make clean
+    make all
 }
 
 package() {
