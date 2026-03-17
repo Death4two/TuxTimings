@@ -47,21 +47,6 @@ if [ "$1" = "--uninstall" ]; then
         rm -f "$DESKTOP_DIR/tuxtimings.desktop"
     fi
 
-    # Optionally remove ryzen_smu DKMS module
-    if command -v dkms &>/dev/null; then
-        SMU_VER=$(_dkms_ver ryzen_smu)
-        if [ -n "$SMU_VER" ]; then
-            read -rp "    Remove ryzen_smu DKMS module ($SMU_VER)? [y/N] " answer
-            case "$answer" in
-                [yY]*)
-                    rmmod ryzen_smu 2>/dev/null || true
-                    dkms remove ryzen_smu/"$SMU_VER" --all 2>/dev/null || true
-                    rm -rf "/usr/src/ryzen_smu-$SMU_VER"
-                    echo "    ryzen_smu removed."
-                    ;;
-            esac
-        fi
-    fi
 
     # Optionally remove aod-voltages DKMS module
     if command -v dkms &>/dev/null; then
