@@ -19,6 +19,12 @@ GITHUB_REPO="Death4two/TuxTimings"
 REAL_USER="${SUDO_USER:-$(whoami)}"
 REAL_HOME=$(getent passwd "$REAL_USER" | cut -d: -f6)
 
+# Compatible with both dkms 2.x ("name, ver,") and dkms 3.x ("name/ver:")
+_dkms_ver() {
+    dkms status "$1" 2>/dev/null \
+        | grep -oP "(?<=$1[/, ])[0-9][0-9.]*" | head -1
+}
+
 # ── Uninstall ─────────────────────────────────────────────────────────
 if [ "$1" = "--uninstall" ]; then
     if [ "$(id -u)" -ne 0 ]; then
@@ -43,7 +49,7 @@ if [ "$1" = "--uninstall" ]; then
 
     # Optionally remove ryzen_smu DKMS module
     if command -v dkms &>/dev/null; then
-        SMU_VER=$(dkms status ryzen_smu 2>/dev/null | grep -oP '(?<=ryzen_smu, )[0-9.]+' | head -1)
+        SMU_VER=$(_dkms_ver ryzen_smu)
         if [ -n "$SMU_VER" ]; then
             read -rp "    Remove ryzen_smu DKMS module ($SMU_VER)? [y/N] " answer
             case "$answer" in
@@ -59,7 +65,7 @@ if [ "$1" = "--uninstall" ]; then
 
     # Optionally remove aod-voltages DKMS module
     if command -v dkms &>/dev/null; then
-        AOD_VER=$(dkms status aod-voltages 2>/dev/null | grep -oP '(?<=aod-voltages, )[0-9.]+' | head -1)
+        AOD_VER=$(_dkms_ver aod-voltages)
         if [ -n "$AOD_VER" ]; then
             read -rp "    Remove aod-voltages DKMS module ($AOD_VER)? [y/N] " answer
             case "$answer" in
@@ -75,7 +81,7 @@ if [ "$1" = "--uninstall" ]; then
 
     # Optionally remove tuxbench DKMS module
     if command -v dkms &>/dev/null; then
-        TB_VER=$(dkms status tuxbench 2>/dev/null | grep -oP '(?<=tuxbench, )[0-9.]+' | head -1)
+        TB_VER=$(_dkms_ver tuxbench)
         if [ -n "$TB_VER" ]; then
             read -rp "    Remove tuxbench DKMS module ($TB_VER)? [y/N] " answer
             case "$answer" in
@@ -451,7 +457,7 @@ install_tuxbench() {
 
     # Remove all versions except the current one so fresh source is always built
     rmmod tuxbench 2>/dev/null || true
-    dkms status tuxbench 2>/dev/null | grep -oP 'tuxbench/\K[0-9.]+' | while read -r old_ver; do
+    dkms status tuxbench 2>/dev/null | grep -oP "(?<=tuxbench[/, ])[0-9][0-9.]*" | while read -r old_ver; do
         [ "$old_ver" = "$TB_VER" ] && continue
         dkms remove tuxbench/"$old_ver" --all 2>/dev/null || true
         rm -rf "/usr/src/tuxbench-$old_ver"
