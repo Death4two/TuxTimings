@@ -1,6 +1,6 @@
 # Maintainer: Death4two <https://github.com/Death4two>
 pkgname=tuxtimings
-pkgver=1.0.4
+pkgver=1.0.5
 pkgrel=1
 pkgdesc="AMD Ryzen DRAM timings and CPU telemetry viewer (GTK4)"
 arch=('x86_64')

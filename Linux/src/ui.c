@@ -8,7 +8,7 @@
 
 /* ── CSS theme (GitHub dark) ────────────────────────────────────────── */
 
-#define APP_VERSION "v1.0.4"
+#define APP_VERSION "v1.0.5"
 
 /* float→double promotion in variadic snprintf calls is harmless here */
 #pragma GCC diagnostic ignored "-Wdouble-promotion"
