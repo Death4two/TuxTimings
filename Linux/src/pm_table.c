@@ -102,6 +102,18 @@ static const pm_family_map_t RAPHAEL_540104 = {
     .core_voltage_start = 301, .core_temp_start = 309, .max_cores = 8
 };
 
+/* Raphael 0x540004 (7950X/7900X 16-core, PM table 0x00540004) */
+static const pm_family_map_t RAPHAEL_540004 = {
+    .named = {
+        {11, F_IOD_HOTSPOT}, {70, F_FCLK}, {74, F_UCLK}, {78, F_MCLK},
+        {82, F_VSOC}, {259, F_VDDG_IOD}, {261, F_VDDG_CCD},
+        {269, F_VDDP}, {271, F_VCORE}
+    },
+    .named_count = 9,
+    .vid_idx = 275, .ppt_idx = 3, .socket_power_idx = 29,
+    .core_voltage_start = 309, .core_temp_start = 325, .max_cores = 16
+};
+
 /* Matisse 0x240903 (3700X/3800X 8-core) */
 static const pm_family_map_t MATISSE_240903 = {
     .named = {
@@ -160,6 +172,7 @@ static const pm_family_map_t RAVEN_1E0004 = {
 static const pm_family_map_t *get_family_map(uint32_t version)
 {
     switch (version) {
+    case 0x540004: return &RAPHAEL_540004;
     case 0x540104: return &RAPHAEL_540104;
     case 0x380804: return &VERMEER_380804;
     case 0x380805: return &VERMEER_380805;
@@ -370,12 +383,15 @@ void pm_table_read(uint32_t version, const float *table, int count,
         out->package_current_a = try_plausible_current(table, count);
         out->cpu_temp_c = try_plausible_temp(table, count);
 
-        /* Raphael (7000-series) per-core clocks and aggregate core clock */
+        /* Raphael per-core clocks */
         if (version == 0x540104 && count > 324) {
             out->core_clocks_count = 8;
-            for (int i = 0; i < 8; i++) {
+            for (int i = 0; i < 8; i++)
                 out->core_clocks_ghz[i] = table[317 + i];
-            }
+        } else if (version == 0x540004 && count > 356) {
+            out->core_clocks_count = 16;
+            for (int i = 0; i < 16; i++)
+                out->core_clocks_ghz[i] = table[341 + i];
         }
     }
 
