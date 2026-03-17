@@ -1,6 +1,6 @@
 # Maintainer: Death4two <https://github.com/Death4two>
 pkgname=tuxtimings
-pkgver=1.0.3
+pkgver=1.0.4
 pkgrel=1
 pkgdesc="AMD Ryzen DRAM timings and CPU telemetry viewer (GTK4)"
 arch=('x86_64')
@@ -10,8 +10,8 @@ depends=('gtk4')
 makedepends=('gcc' 'pkgconf')
 optdepends=(
     'clang: required if your kernel was built with Clang (CachyOS, etc)'
-    'dkms: required to build aod-voltages kernel module for memory voltage readings'
-    'linux-headers: required to build aod-voltages kernel module'
+    'dkms: required to build aod-voltages and tuxbench kernel modules'
+    'linux-headers: required to build aod-voltages and tuxbench kernel modules'
     'ryzen_smu-dkms-git: kernel module for reading AMD SMN/PM tables'
     'nct6775-dkms-git: fan readings on boards with Nuvoton Super I/O (NCT6775F through NCT6799D)'
 )
@@ -39,6 +39,15 @@ package() {
     install -Dm644 src/aod-voltages/aod_voltages.c  "$pkgdir/usr/src/aod-voltages-$aod_ver/aod_voltages.c"
     install -Dm644 src/aod-voltages/Makefile         "$pkgdir/usr/src/aod-voltages-$aod_ver/Makefile"
     install -Dm644 src/aod-voltages/dkms.conf        "$pkgdir/usr/src/aod-voltages-$aod_ver/dkms.conf"
+
+    # tuxbench DKMS module source
+    local tb_ver
+    tb_ver=$(grep '^PACKAGE_VERSION=' src/tuxbench/dkms.conf | cut -d= -f2 | tr -d '"')
+    install -dm755 "$pkgdir/usr/src/tuxbench-$tb_ver"
+    install -Dm644 src/tuxbench/tuxbench.c   "$pkgdir/usr/src/tuxbench-$tb_ver/tuxbench.c"
+    install -Dm644 src/tuxbench/tuxbench.h   "$pkgdir/usr/src/tuxbench-$tb_ver/tuxbench.h"
+    install -Dm644 src/tuxbench/Makefile     "$pkgdir/usr/src/tuxbench-$tb_ver/Makefile"
+    install -Dm644 src/tuxbench/dkms.conf    "$pkgdir/usr/src/tuxbench-$tb_ver/dkms.conf"
 
     # Polkit policy
     install -Dm644 /dev/stdin "$pkgdir/usr/share/polkit-1/actions/com.tuxtimings.policy" << 'EOF'
@@ -93,8 +102,9 @@ LAUNCHER
 }
 
 pre_install() {
-    # Remove any leftover aod-voltages DKMS source dirs from previous installs
+    # Remove any leftover DKMS source dirs from previous installs
     rm -rf /usr/src/aod-voltages-*/
+    rm -rf /usr/src/tuxbench-*/
 }
 
 pre_upgrade() {
@@ -102,13 +112,24 @@ pre_upgrade() {
 }
 
 post_install() {
-    local aod_ver
-    aod_ver=$(grep '^PACKAGE_VERSION=' /usr/src/aod-voltages-*/dkms.conf 2>/dev/null | head -1 | cut -d= -f2 | tr -d '"')
-    if [ -n "$aod_ver" ] && command -v dkms &>/dev/null; then
-        echo "==> Building aod-voltages $aod_ver DKMS module..."
-        dkms add aod-voltages/"$aod_ver" 2>/dev/null || true
-        dkms build aod-voltages/"$aod_ver" && dkms install aod-voltages/"$aod_ver" || \
-            echo "  WARNING: aod-voltages DKMS build failed — memory voltages will be unavailable"
+    if command -v dkms &>/dev/null; then
+        local aod_ver
+        aod_ver=$(grep '^PACKAGE_VERSION=' /usr/src/aod-voltages-*/dkms.conf 2>/dev/null | head -1 | cut -d= -f2 | tr -d '"')
+        if [ -n "$aod_ver" ]; then
+            echo "==> Building aod-voltages $aod_ver DKMS module..."
+            dkms add aod-voltages/"$aod_ver" 2>/dev/null || true
+            dkms build aod-voltages/"$aod_ver" && dkms install aod-voltages/"$aod_ver" || \
+                echo "  WARNING: aod-voltages DKMS build failed — memory voltages will be unavailable"
+        fi
+
+        local tb_ver
+        tb_ver=$(grep '^PACKAGE_VERSION=' /usr/src/tuxbench-*/dkms.conf 2>/dev/null | head -1 | cut -d= -f2 | tr -d '"')
+        if [ -n "$tb_ver" ]; then
+            echo "==> Building tuxbench $tb_ver DKMS module..."
+            dkms add tuxbench/"$tb_ver" 2>/dev/null || true
+            dkms build tuxbench/"$tb_ver" && dkms install tuxbench/"$tb_ver" || \
+                echo "  WARNING: tuxbench DKMS build failed — benchmark will use userspace fallback"
+        fi
     fi
 }
 
@@ -123,6 +144,13 @@ pre_remove() {
         if [ -n "$aod_ver" ]; then
             rmmod aod_voltages 2>/dev/null || true
             dkms remove aod-voltages/"$aod_ver" --all 2>/dev/null || true
+        fi
+
+        local tb_ver
+        tb_ver=$(dkms status tuxbench 2>/dev/null | grep -oP '(?<=tuxbench, )[0-9.]+' | head -1)
+        if [ -n "$tb_ver" ]; then
+            rmmod tuxbench 2>/dev/null || true
+            dkms remove tuxbench/"$tb_ver" --all 2>/dev/null || true
         fi
     fi
 }

@@ -1,5 +1,6 @@
 #include "ui.h"
 #include "backend.h"
+#include "bench.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,6 +11,7 @@
 static void on_signal(int sig)
 {
     (void)sig;
+    bench_unload_kmod();
     backend_cleanup();
     _exit(0);
 }
@@ -136,6 +138,7 @@ int main(int argc, char *argv[])
     GtkApplication *app = ui_create(argc, argv);
     int status = g_application_run(G_APPLICATION(app), argc, argv);
     g_object_unref(app);
+    bench_unload_kmod();
     backend_cleanup();
     return status;
 }

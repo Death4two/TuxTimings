@@ -73,6 +73,22 @@ if [ "$1" = "--uninstall" ]; then
         fi
     fi
 
+    # Optionally remove tuxbench DKMS module
+    if command -v dkms &>/dev/null; then
+        TB_VER=$(dkms status tuxbench 2>/dev/null | grep -oP '(?<=tuxbench, )[0-9.]+' | head -1)
+        if [ -n "$TB_VER" ]; then
+            read -rp "    Remove tuxbench DKMS module ($TB_VER)? [y/N] " answer
+            case "$answer" in
+                [yY]*)
+                    rmmod tuxbench 2>/dev/null || true
+                    dkms remove tuxbench/"$TB_VER" --all 2>/dev/null || true
+                    rm -rf "/usr/src/tuxbench-$TB_VER"
+                    echo "    tuxbench removed."
+                    ;;
+            esac
+        fi
+    fi
+
     echo "==> TuxTimings has been uninstalled."
     exit 0
 fi
@@ -127,7 +143,7 @@ if [ "$1" = "--deb" ]; then
         "$MAKE" -C "$SCRIPT_DIR" clean all
     fi
 
-    PKG_VERSION="1.0.3"
+    PKG_VERSION="1.0.4"
     DEB_ROOT="$SCRIPT_DIR/deb-build/tuxtimings_${PKG_VERSION}_amd64"
     rm -rf "$SCRIPT_DIR/deb-build"
     mkdir -p "$DEB_ROOT/DEBIAN"
@@ -410,6 +426,46 @@ install_aod_voltages() {
 }
 
 install_aod_voltages || true
+
+# ── tuxbench kernel module ────────────────────────────────────────────
+install_tuxbench() {
+    local TB_SRC="$SCRIPT_DIR/src/tuxbench"
+
+    if [ ! -d "$TB_SRC" ]; then
+        echo "    WARNING: tuxbench source not found at $TB_SRC, skipping."
+        return 0
+    fi
+
+    if ! command -v dkms &>/dev/null; then
+        echo "    WARNING: dkms not found — cannot install tuxbench module."
+        return 0
+    fi
+
+    # Already installed?
+    if dkms status tuxbench 2>/dev/null | grep -q "installed"; then
+        echo "==> tuxbench module already installed via DKMS."
+        return 0
+    fi
+
+    local TB_VER
+    TB_VER=$(grep '^PACKAGE_VERSION=' "$TB_SRC/dkms.conf" | cut -d= -f2 | tr -d '"')
+    echo "==> Installing tuxbench $TB_VER via DKMS..."
+
+    local DKMS_SRC="/usr/src/tuxbench-$TB_VER"
+    mkdir -p "$DKMS_SRC"
+    cp "$TB_SRC/dkms.conf" "$TB_SRC/Makefile" "$TB_SRC"/*.c "$TB_SRC"/*.h "$DKMS_SRC/"
+
+    if dkms add tuxbench/"$TB_VER" 2>/dev/null || true; then
+        if dkms build tuxbench/"$TB_VER" && dkms install tuxbench/"$TB_VER"; then
+            echo "==> tuxbench installed successfully (loaded on demand by TuxTimings)."
+        else
+            echo "    WARNING: tuxbench DKMS build failed. Check kernel headers."
+            return 1
+        fi
+    fi
+}
+
+install_tuxbench || true
 
 # ── nct6775 kernel module (Nuvoton Super I/O fan/temp) ────────────────
 install_nct6775() {

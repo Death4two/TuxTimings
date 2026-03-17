@@ -1,12 +1,13 @@
 #include "ui.h"
 #include "backend.h"
+#include "bench.h"
 #include <stdio.h>
 #include <string.h>
 #include <locale.h>
 
 /* ── CSS theme (GitHub dark) ────────────────────────────────────────── */
 
-#define APP_VERSION "v1.0.3"
+#define APP_VERSION "v1.0.4"
 
 /* float→double promotion in variadic snprintf calls is harmless here */
 #pragma GCC diagnostic ignored "-Wdouble-promotion"
@@ -27,7 +28,10 @@ static const char *css_data =
     "notebook > stack { background: transparent; }\n"
     "dropdown { background-color: #161B22; color: #E6EDF3; }\n"
     "dropdown > button { background-color: #161B22; color: #E6EDF3; border: 1px solid #30363D; }\n"
-    "scrolledwindow { background: transparent; }\n";
+    "scrolledwindow { background: transparent; }\n"
+    "button { background-color: #21262D; color: #E6EDF3; border: 1px solid #30363D; border-radius: 6px; padding: 4px 12px; }\n"
+    "button:hover { background-color: #30363D; }\n"
+    "button:disabled { opacity: 0.4; }\n";
 
 static void load_css(void)
 {
@@ -597,6 +601,116 @@ static void on_debug_dump(GtkButton *btn, gpointer user_data)
     gtk_window_present(GTK_WINDOW(win));
 }
 
+/* ── Benchmark tab ──────────────────────────────────────────────────── */
+
+typedef struct {
+    app_widgets_t  *w;
+    bench_results_t results;
+} bench_job_t;
+
+static gboolean bench_done(gpointer data)
+{
+    bench_job_t *job = data;
+    app_widgets_t *w = job->w;
+    bench_results_t *r = &job->results;
+
+    set_label_fmt(w->lbl_bench_lat_l1,   "%.1f ns",  r->lat_l1_ns);
+    set_label_fmt(w->lbl_bench_lat_l2,   "%.1f ns",  r->lat_l2_ns);
+    set_label_fmt(w->lbl_bench_lat_l3,   "%.1f ns",  r->lat_l3_ns);
+    set_label_fmt(w->lbl_bench_lat_dram, "%.1f ns",  r->lat_dram_ns);
+    set_label_fmt(w->lbl_bench_bw_read,  "%.0f MB/s", r->bw_read_mbs);
+    set_label_fmt(w->lbl_bench_bw_write, "%.0f MB/s", r->bw_write_mbs);
+    set_label_fmt(w->lbl_bench_bw_copy,  "%.0f MB/s", r->bw_copy_mbs);
+
+    set_label_text(w->lbl_bench_status, "Done");
+    gtk_widget_set_sensitive(w->btn_bench_run, TRUE);
+    free(job);
+    return G_SOURCE_REMOVE;
+}
+
+static gpointer bench_thread(gpointer data)
+{
+    bench_job_t *job = data;
+    bench_run(&job->results);
+    g_idle_add(bench_done, job);
+    return NULL;
+}
+
+static void on_bench_run(GtkButton *btn, gpointer user_data)
+{
+    app_widgets_t *w = user_data;
+    gtk_widget_set_sensitive(GTK_WIDGET(btn), FALSE);
+    set_label_text(w->lbl_bench_status, "Running…");
+
+    bench_job_t *job = malloc(sizeof(*job));
+    job->w = w;
+    memset(&job->results, 0, sizeof(job->results));
+    g_thread_new("bench", bench_thread, job);
+}
+
+static GtkWidget *build_bench_tab(app_widgets_t *w)
+{
+    GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
+    gtk_widget_set_margin_top(vbox, 8);
+    gtk_widget_set_margin_start(vbox, 8);
+    gtk_widget_set_margin_end(vbox, 8);
+    gtk_widget_set_margin_bottom(vbox, 8);
+
+    /* Run button row */
+    GtkWidget *btn_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    w->btn_bench_run = gtk_button_new_with_label("Run Benchmark");
+    g_signal_connect(w->btn_bench_run, "clicked", G_CALLBACK(on_bench_run), w);
+    w->lbl_bench_status = make_label("Ready", "header-muted");
+    gtk_widget_set_valign(w->lbl_bench_status, GTK_ALIGN_CENTER);
+    gtk_box_append(GTK_BOX(btn_row), w->btn_bench_run);
+    gtk_box_append(GTK_BOX(btn_row), w->lbl_bench_status);
+    gtk_box_append(GTK_BOX(vbox), btn_row);
+
+    /* Two-column row: Latency | Bandwidth */
+    GtkWidget *cols = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
+    gtk_widget_set_hexpand(cols, TRUE);
+    gtk_box_set_homogeneous(GTK_BOX(cols), TRUE);
+
+    /* Latency section */
+    GtkWidget *lat_box = make_section_box();
+    {
+        GtkWidget *title = make_label("Cache & DRAM Latency", "section-title");
+        gtk_box_append(GTK_BOX(lat_box), title);
+
+        GtkWidget *g = gtk_grid_new();
+        gtk_grid_set_row_spacing(GTK_GRID(g), 4);
+        gtk_grid_set_column_spacing(GTK_GRID(g), 8);
+        int r = 0;
+        grid_row(g, r++, "L1 Cache:",  &w->lbl_bench_lat_l1);
+        grid_row(g, r++, "L2 Cache:",  &w->lbl_bench_lat_l2);
+        grid_row(g, r++, "L3 Cache:",  &w->lbl_bench_lat_l3);
+        grid_row(g, r++, "DRAM:",       &w->lbl_bench_lat_dram);
+        gtk_box_append(GTK_BOX(lat_box), g);
+    }
+
+    /* Bandwidth section */
+    GtkWidget *bw_box = make_section_box();
+    {
+        GtkWidget *title = make_label("DRAM Bandwidth", "section-title");
+        gtk_box_append(GTK_BOX(bw_box), title);
+
+        GtkWidget *g = gtk_grid_new();
+        gtk_grid_set_row_spacing(GTK_GRID(g), 4);
+        gtk_grid_set_column_spacing(GTK_GRID(g), 8);
+        int r = 0;
+        grid_row(g, r++, "Read:",  &w->lbl_bench_bw_read);
+        grid_row(g, r++, "Write:", &w->lbl_bench_bw_write);
+        grid_row(g, r++, "Copy:",  &w->lbl_bench_bw_copy);
+        gtk_box_append(GTK_BOX(bw_box), g);
+    }
+
+    gtk_box_append(GTK_BOX(cols), lat_box);
+    gtk_box_append(GTK_BOX(cols), bw_box);
+    gtk_box_append(GTK_BOX(vbox), cols);
+
+    return vbox;
+}
+
 /* Module dropdown selection changed */
 static void on_module_changed(GtkDropDown *dropdown, GParamSpec *pspec, gpointer user_data)
 {
@@ -684,6 +798,9 @@ static void on_activate(GtkApplication *app, gpointer user_data)
 
     GtkWidget *cpu_tab = build_cpu_tab(w);
     gtk_notebook_append_page(GTK_NOTEBOOK(notebook), cpu_tab, gtk_label_new("CPU"));
+
+    GtkWidget *bench_tab = build_bench_tab(w);
+    gtk_notebook_append_page(GTK_NOTEBOOK(notebook), bench_tab, gtk_label_new("Benchmark"));
 
     gtk_box_append(GTK_BOX(main_box), notebook);
 

@@ -1,8 +1,8 @@
 CC       = gcc
 PKG      = gtk4
-CFLAGS   = -Wall -Wextra -O2 $(shell pkg-config --cflags $(PKG)) \
+CFLAGS   = -Wall -Wextra -O2 -march=native $(shell pkg-config --cflags $(PKG)) \
            -fPIE -fstack-protector-strong -D_FORTIFY_SOURCE=2
-LDFLAGS  = $(shell pkg-config --libs $(PKG)) -pie
+LDFLAGS  = $(shell pkg-config --libs $(PKG)) -pie -lpthread
 SRCS     = $(wildcard src/*.c)
 OBJS     = $(SRCS:.c=.o)
 TARGET   = tuxtimings
@@ -15,7 +15,17 @@ $(TARGET): $(OBJS)
 src/%.o: src/%.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-clean:
+# Build the tuxbench kernel module (optional — app works without it)
+kmod:
+	$(MAKE) -C src/tuxbench
+
+kmod-install: kmod
+	$(MAKE) -C src/tuxbench install
+
+kmod-clean:
+	$(MAKE) -C src/tuxbench clean
+
+clean: kmod-clean
 	rm -f src/*.o $(TARGET)
 
-.PHONY: all clean
+.PHONY: all clean kmod kmod-install kmod-clean
