@@ -149,7 +149,7 @@ static const pm_family_map_t RENOIR_370005 = {
 /* Raven Ridge 0x1E0004 (2500U APU) */
 static const pm_family_map_t RAVEN_1E0004 = {
     .named = {
-        {61, F_IOD_HOTSPOT}, {166, F_FCLK}, {167, F_UCLK}, {168, F_MCLK},
+        {11, F_IOD_HOTSPOT}, {166, F_FCLK}, {167, F_UCLK}, {168, F_MCLK},
         {65, F_VSOC}, {60, F_VDDP}, {61, F_VCORE}
     },
     .named_count = 7,

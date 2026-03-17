@@ -63,8 +63,9 @@ static void elevate_if_necessary(int argc, char **argv)
         if (getenv(env_vars[i])) env_count++;
     }
 
-    /* +3: pkexec, self, NULL; +argc for original args */
-    int total = 2 + env_count + (argc - 1) + 1;
+    /* +3: pkexec, self, NULL; +argc for original args;
+     * +1 extra for the conditional --env-GDK_BACKEND=wayland entry */
+    int total = 2 + env_count + 1 + (argc - 1) + 1;
     char **new_argv = malloc(total * sizeof(char *));
     if (!new_argv) return;
 
@@ -97,7 +98,7 @@ static void elevate_if_necessary(int argc, char **argv)
     }
 
     /* If on Wayland, forward that hint */
-    if (getenv("WAYLAND_DISPLAY")) {
+    if (getenv("WAYLAND_DISPLAY") && ei < 16) {
         snprintf(env_bufs[ei], sizeof(env_bufs[ei]), "--env-GDK_BACKEND=wayland");
         new_argv[n++] = env_bufs[ei++];
     }

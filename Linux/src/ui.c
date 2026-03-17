@@ -575,7 +575,10 @@ static void on_debug_dump(GtkButton *btn, gpointer user_data)
     GtkWidget *parent = GTK_WIDGET(user_data);
 
     char *text = backend_read_debug_dump();
-    if (!text) text = strdup("(failed to read debug data)");
+    if (!text) {
+        text = strdup("(failed to read debug data)");
+        if (!text) return;
+    }
 
     GtkWidget *win = gtk_window_new();
     gtk_window_set_title(GTK_WINDOW(win), "Debug Dump");
@@ -644,9 +647,10 @@ static void on_bench_run(GtkButton *btn, gpointer user_data)
     set_label_text(w->lbl_bench_status, "Running…");
 
     bench_job_t *job = malloc(sizeof(*job));
+    if (!job) return;
     job->w = w;
     memset(&job->results, 0, sizeof(job->results));
-    g_thread_new("bench", bench_thread, job);
+    g_thread_unref(g_thread_new("bench", bench_thread, job));
 }
 
 /* ── Pi benchmark tab ───────────────────────────────────────────────── */
@@ -695,10 +699,11 @@ static void on_pi_run(GtkButton *btn, gpointer user_data)
     if (sel >= G_N_ELEMENTS(digit_counts)) sel = 1;
 
     pi_job_t *job = malloc(sizeof(*job));
+    if (!job) return;
     job->w        = w;
     job->n_digits = digit_counts[sel];
     memset(&job->results, 0, sizeof(job->results));
-    g_thread_new("pi", pi_thread, job);
+    g_thread_unref(g_thread_new("pi", pi_thread, job));
 }
 
 static GtkWidget *build_bench_tab(app_widgets_t *w)
@@ -866,8 +871,6 @@ static void on_activate(GtkApplication *app, gpointer user_data)
     gtk_box_append(GTK_BOX(header), header_top);
 
     w->lbl_codename = make_label("", "header-muted");
-    w->lbl_smu_version = make_label("", "footer-muted");
-    w->lbl_pm_table_version = make_label("", "footer-muted");
     gtk_box_append(GTK_BOX(header), w->lbl_codename);
 
     /* Board info row: board string left, version right */

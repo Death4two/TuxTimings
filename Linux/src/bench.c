@@ -936,7 +936,7 @@ static size_t read_cache_size(int cpu, int index)
              "/sys/devices/system/cpu/cpu%d/cache/index%d/size", cpu, index);
     FILE *f = fopen(path, "r");
     if (!f) return 0;
-    fgets(buf, sizeof(buf), f);
+    if (!fgets(buf, sizeof(buf), f)) { fclose(f); return 0; }
     fclose(f);
     return strtoul(buf, NULL, 10) * 1024UL;
 }
@@ -970,7 +970,7 @@ static void detect_lat_buf_sizes(size_t *l1, size_t *l2, size_t *l3)
 
     /* Guarantee strict ordering: each buffer must exceed the level below */
     if (*l2 <= *l1) *l2 = *l1 * 4;
-    if (*l3 <= *l2) *l3 = *l2 * 8;
+    if (*l3 <= *l2) *l3 = *l2 * 4;
 }
 
 /* ── Public ──────────────────────────────────────────────────────────── */
@@ -1039,12 +1039,12 @@ void bench_run(bench_results_t *out)
      * millions of nodes (~380 ms). */
     size_t lat_l1, lat_l2, lat_l3;
     detect_lat_buf_sizes(&lat_l1, &lat_l2, &lat_l3);
-    size_t lat_dram = dram_buf_bytes();
+    size_t dram_sz = dram_buf_bytes(); /* computed once, shared by latency + bandwidth */
 
     out->lat_l1_ns   = measure_latency_ns(lat_l1,   200000000LL, LAT_SAMPLES, 0);
     out->lat_l2_ns   = measure_latency_ns(lat_l2,    50000000LL, LAT_SAMPLES, 0);
-    out->lat_l3_ns   = measure_latency_ns(lat_l3,     5000000LL, LAT_SAMPLES, 0);
-    out->lat_dram_ns = measure_latency_ns(lat_dram,   1000000LL, 3,           1);
+    out->lat_l3_ns   = measure_latency_ns(lat_l3,    20000000LL, LAT_SAMPLES, 0);
+    out->lat_dram_ns = measure_latency_ns(dram_sz,    1000000LL, 3,           1);
 
     /* --- Bandwidth (multi-threaded, one thread per physical core) ---
      *
@@ -1054,7 +1054,6 @@ void bench_run(bench_results_t *out)
      * the wall-clock timing window covers all parallel work. */
     int    cpu_list[MAX_THREADS];
     int    nthreads = build_cpu_list(cpu_list, MAX_THREADS);
-    size_t dram_sz  = dram_buf_bytes();
 
     uint64_t *buf_a = bench_alloc(dram_sz);
     uint64_t *buf_b = bench_alloc(dram_sz);

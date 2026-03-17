@@ -11,8 +11,6 @@ typedef struct {
     /* Header */
     GtkWidget *lbl_cpu_name;
     GtkWidget *lbl_codename;
-    GtkWidget *lbl_smu_version;
-    GtkWidget *lbl_pm_table_version;
     GtkWidget *lbl_board_info;
     GtkWidget *combo_modules;
 

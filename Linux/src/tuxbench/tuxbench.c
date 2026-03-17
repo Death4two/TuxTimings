@@ -46,13 +46,20 @@
 #include <linux/sort.h>
 #include <linux/topology.h>
 #include <asm/special_insns.h>
+#include <asm/fpu/api.h>
+#include <asm/cpufeature.h>
 
 #include "tuxbench.h"
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("TuxTimings");
 MODULE_DESCRIPTION("Kernel-mode memory latency and bandwidth benchmark");
-MODULE_VERSION("0.2");
+MODULE_VERSION("0.4");
+
+/* AVX2 vector type — 4×u64 = 256 bits, unaligned-safe */
+typedef unsigned long long v4u64 __attribute__((vector_size(32), aligned(1)));
+
+static bool tb_avx2;
 
 /* ── Constants ──────────────────────────────────────────────────────────── */
 
@@ -213,6 +220,17 @@ static u64 tb_measure_latency_ps(size_t buf_bytes, long long min_iters,
         for (i = 0; i < n_nodes - 1; i++)
             nodes[indices[i]].next = &nodes[indices[i + 1]];
         nodes[indices[n_nodes - 1]].next = &nodes[indices[0]];
+    }
+
+    /* Warm-up pass: one full traversal before any timing begins.
+     * Ensures the chain is resident in the target cache level so that
+     * sample[0] does not include cold-miss (DRAM-speed) accesses. */
+    {
+        tb_node_t *p = &nodes[0];
+        size_t j;
+        for (j = 0; j < n_nodes; j++)
+            p = p->next;
+        WRITE_ONCE(nodes[0].pad[0], (char)(uintptr_t)p);
     }
 
     n = 0;
@@ -428,13 +446,65 @@ struct bw_thread {
  * 8× unroll fills all AMD WC buffers per iteration (8 × 64B = 512B).
  */
 
-static void do_read_kernel(const u64 *a, size_t n)
+/*
+ * Streaming read prefetch strategy:
+ *
+ * prefetchnta (locality=0) uses the non-temporal path — avoids polluting
+ * L1/L2 with the large benchmark buffer, and on AMD sustains higher
+ * streaming throughput than prefetcht0.
+ *
+ * Three staggered distances keep the memory request queue full:
+ *   PF_A = 64 lines (~early fill)
+ *   PF_B = 96 lines (~mid)
+ *   PF_C = 128 lines (~far, matches Little's Law headroom)
+ *
+ * Each iteration covers 8 u64s = 1 cache line, so distances are in
+ * units of (N * 8) u64 offsets.
+ */
+
+static void do_read_kernel(u64 *a, size_t n)
 {
-    u64 sink = 0;
-    size_t i;
-    for (i = 0; i + 7 < n; i += 8)
-        sink ^= a[i+0] ^ a[i+1] ^ a[i+2] ^ a[i+3]
-              ^ a[i+4] ^ a[i+5] ^ a[i+6] ^ a[i+7];
+    u64 sink;
+
+    if (tb_avx2) {
+        /*
+         * AVX2 path: 8 independent 256-bit accumulators, 256 bytes per
+         * iteration.  kernel_fpu_begin/end saves/restores YMM state.
+         * GCC vector extensions compile to vmovdqu + vpxor without
+         * requiring immintrin.h.
+         */
+        const char *p    = (const char *)a;
+        const char *stop = p + ((n * sizeof(u64)) & ~255UL);
+        v4u64 s0 = {}, s1 = {}, s2 = {}, s3 = {},
+              s4 = {}, s5 = {}, s6 = {}, s7 = {};
+
+        kernel_fpu_begin();
+        for (; p < stop; p += 256) {
+            s0 ^= *(const v4u64 *)(p +   0);
+            s1 ^= *(const v4u64 *)(p +  32);
+            s2 ^= *(const v4u64 *)(p +  64);
+            s3 ^= *(const v4u64 *)(p +  96);
+            s4 ^= *(const v4u64 *)(p + 128);
+            s5 ^= *(const v4u64 *)(p + 160);
+            s6 ^= *(const v4u64 *)(p + 192);
+            s7 ^= *(const v4u64 *)(p + 224);
+        }
+        s0 ^= s1; s2 ^= s3; s4 ^= s5; s6 ^= s7;
+        s0 ^= s2; s4 ^= s6; s0 ^= s4;
+        sink = s0[0] ^ s0[1] ^ s0[2] ^ s0[3];
+        kernel_fpu_end();
+    } else {
+        /* Scalar fallback for CPUs without AVX2 */
+        u64 s0 = 0, s1 = 0, s2 = 0, s3 = 0,
+            s4 = 0, s5 = 0, s6 = 0, s7 = 0;
+        size_t i;
+        for (i = 0; i + 7 < n; i += 8) {
+            s0 ^= a[i+0]; s1 ^= a[i+1]; s2 ^= a[i+2]; s3 ^= a[i+3];
+            s4 ^= a[i+4]; s5 ^= a[i+5]; s6 ^= a[i+6]; s7 ^= a[i+7];
+        }
+        sink = s0 ^ s1 ^ s2 ^ s3 ^ s4 ^ s5 ^ s6 ^ s7;
+    }
+
     WRITE_ONCE(*(u64 *)a, sink);
 }
 
@@ -738,7 +808,7 @@ static long tb_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 
         req.lat_l1_ps   = tb_measure_latency_ps(l1,       200000000LL, 0, node);
         req.lat_l2_ps   = tb_measure_latency_ps(l2,        50000000LL, 0, node);
-        req.lat_l3_ps   = tb_measure_latency_ps(l3,         5000000LL, 0, node);
+        req.lat_l3_ps   = tb_measure_latency_ps(l3,        20000000LL, 0, node);
         req.lat_dram_ps = tb_measure_latency_ps(dram_buf,   1000000LL, 1, node);
     }
 
@@ -800,8 +870,11 @@ static int __init tuxbench_init(void)
         goto err_class;
     }
 
+    tb_avx2 = boot_cpu_has(X86_FEATURE_AVX2);
     pr_info("tuxbench: ready at /dev/%s (major %d)\n",
             DEVICE_NAME, MAJOR(tb_dev));
+    pr_info("tuxbench: read path = %s\n",
+            tb_avx2 ? "AVX2 (8x256-bit accumulators)" : "scalar (8x64-bit accumulators)");
     return 0;
 
 err_class:

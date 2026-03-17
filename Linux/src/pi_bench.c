@@ -175,6 +175,7 @@ void pi_bench_run(int n_digits, pi_results_t *out)
 
     bs_task_t *tasks = calloc((size_t)M, sizeof(bs_task_t));
     pthread_t *tids  = calloc((size_t)nthreads, sizeof(pthread_t));
+    if (!tasks || !tids) { free(tasks); free(tids); return; }
 
     bs_queue_t q;
     q.tasks = tasks;
@@ -182,9 +183,12 @@ void pi_bench_run(int n_digits, pi_results_t *out)
     q.N     = N;
     atomic_init(&q.next_task, 0);
 
-    for (int i = 0; i < nthreads; i++)
-        pthread_create(&tids[i], NULL, bs_queue_worker, &q);
-    for (int i = 0; i < nthreads; i++)
+    int nstarted = 0;
+    for (int i = 0; i < nthreads; i++) {
+        if (pthread_create(&tids[i], NULL, bs_queue_worker, &q) == 0)
+            nstarted++;
+    }
+    for (int i = 0; i < nstarted; i++)
         pthread_join(tids[i], NULL);
 
     /* Merge all M task results in order into tasks[0] */
