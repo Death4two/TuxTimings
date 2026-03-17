@@ -154,6 +154,7 @@ static uint64_t parse_capacity(const char *val)
     uint64_t size = 0;
     char unit[16] = {0};
     if (sscanf(val, "%lu %15s", &size, unit) < 2) return 0;
+    if (size > 0x100000) return 0; /* sanity: reject anything over ~1 TB */
     /* upper-case unit */
     for (char *p = unit; *p; p++) *p = (char)toupper((unsigned char)*p);
     if (strcmp(unit, "GB") == 0 || strcmp(unit, "GIB") == 0)

@@ -59,10 +59,11 @@ char *run_command(const char *cmd)
     while ((n = fread(buf + len, 1, cap - len - 1, fp)) > 0) {
         len += n;
         if (len + 1 >= cap) {
-            cap *= 2;
-            char *tmp = realloc(buf, cap);
-            if (!tmp) break;
+            size_t new_cap = cap * 2;
+            char *tmp = realloc(buf, new_cap);
+            if (!tmp) { free(buf); pclose(fp); return NULL; }
             buf = tmp;
+            cap = new_cap;
         }
     }
     buf[len] = '\0';

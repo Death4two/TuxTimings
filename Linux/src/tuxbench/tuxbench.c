@@ -61,7 +61,8 @@ MODULE_VERSION("0.2");
 
 /* Latency: one pointer-chase node per cache line */
 #define CACHELINE       64
-#define LAT_SAMPLES     7          /* odd → clean median               */
+#define LAT_SAMPLES_MIN 5          /* minimum samples before CV² check */
+#define LAT_SAMPLES_MAX 32         /* hard cap                         */
 
 /* Bandwidth */
 #define BW_PASSES_MAX   64
@@ -181,9 +182,9 @@ static u64 tb_measure_latency_ps(size_t buf_bytes, long long min_iters,
     size_t n_nodes = buf_bytes / sizeof(tb_node_t);
     tb_node_t *nodes;
     size_t *indices;
-    u64 samples[LAT_SAMPLES];
+    u64 samples[LAT_SAMPLES_MAX];
     u64 rng;
-    int s;
+    int s, n;
 
     if (n_nodes < 2)
         return 0;
@@ -202,18 +203,23 @@ static u64 tb_measure_latency_ps(size_t buf_bytes, long long min_iters,
 
     sched_set_fifo(current);
 
-    for (s = 0; s < LAT_SAMPLES; s++) {
+    /* Build the random permutation once.  All samples chase the same chain
+     * so DRAM row-hit patterns are identical across samples, eliminating
+     * the inter-sample variance caused by different access patterns. */
+    {
         size_t i;
-        tb_node_t *p;
-        u64 t0, t1, iters;
-        long long elapsed_ns;
-
-        /* build random permutation */
         for (i = 0; i < n_nodes; i++) indices[i] = i;
         tb_shuffle(indices, n_nodes, &rng);
         for (i = 0; i < n_nodes - 1; i++)
             nodes[indices[i]].next = &nodes[indices[i + 1]];
         nodes[indices[n_nodes - 1]].next = &nodes[indices[0]];
+    }
+
+    n = 0;
+    for (s = 0; s < LAT_SAMPLES_MAX; s++) {
+        tb_node_t *p;
+        u64 t0, t1, iters;
+        long long elapsed_ns;
 
         if (flush_each)
             tb_flush_all();
@@ -240,6 +246,30 @@ static u64 tb_measure_latency_ps(size_t buf_bytes, long long min_iters,
 
         elapsed_ns = (long long)(t1 - t0);
         samples[s] = (u64)elapsed_ns * 1000ULL / (iters * (u64)n_nodes);
+        n++;
+
+        if (n < LAT_SAMPLES_MIN) continue;
+
+        /* CV² < 0.0001  ↔  var*10000 < mean²  (same criterion as bandwidth) */
+        {
+            s64 isum = 0;
+            u64 imean, ivar, imean2;
+            int i;
+
+            for (i = 0; i < n; i++) isum += (s64)samples[i];
+            imean = (u64)(isum / n);
+
+            ivar = 0;
+            for (i = 0; i < n; i++) {
+                s64 d = (s64)samples[i] - (s64)imean;
+                ivar += (u64)(d * d);
+            }
+            if (n > 1) ivar /= (u64)(n - 1);
+
+            imean2 = imean * imean;
+            if (ivar * 10000ULL < imean2)
+                break;
+        }
     }
 
     sched_set_normal(current, 0);
@@ -247,8 +277,8 @@ static u64 tb_measure_latency_ps(size_t buf_bytes, long long min_iters,
     kvfree(indices);
     tb_free(nodes, buf_bytes);
 
-    sort(samples, LAT_SAMPLES, sizeof(u64), cmp_u64, NULL);
-    return samples[LAT_SAMPLES / 2];
+    sort(samples, n, sizeof(u64), cmp_u64, NULL);
+    return samples[n / 2];
 }
 
 /* ── Cache sizing via sysfs ───────────────────────────────────────────── */

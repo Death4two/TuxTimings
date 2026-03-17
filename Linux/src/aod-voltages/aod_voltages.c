@@ -321,12 +321,8 @@ static int __init aod_voltages_init(void)
         return -ENOMEM;
     }
 
-    pr_info("aod_voltages: ready — /sys/kernel/aod_voltages/scan\n");
-    if (off_vddio >= 0 || off_vddq >= 0 || off_vpp >= 0)
-        pr_info("aod_voltages: offsets vddio=%d vddq=%d vpp=%d\n",
-                off_vddio, off_vddq, off_vpp);
-    else
-        pr_info("aod_voltages: run 'cat /sys/kernel/aod_voltages/scan' to find offsets\n");
+    pr_info("aod_voltages: ready — offsets vddio=%d vddq=%d vpp=%d\n",
+            off_vddio, off_vddq, off_vpp);
 
     return 0;
 }
