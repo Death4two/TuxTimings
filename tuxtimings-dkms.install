@@ -1,3 +1,9 @@
+_dkms_ver() {
+    # Compatible with both dkms 2.x ("name, ver,") and dkms 3.x ("name/ver:")
+    dkms status "$1" 2>/dev/null \
+        | grep -oP "(?<=$1[/, ])[0-9][0-9.]*" | head -1
+}
+
 pre_install() {
     # Remove any leftover DKMS source dirs from previous installs
     rm -rf /usr/src/aod-voltages-*/
@@ -37,14 +43,14 @@ post_upgrade() {
 pre_remove() {
     if command -v dkms &>/dev/null; then
         local aod_ver
-        aod_ver=$(dkms status aod-voltages 2>/dev/null | grep -oP '(?<=aod-voltages, )[0-9.]+' | head -1)
+        aod_ver=$(_dkms_ver aod-voltages)
         if [ -n "$aod_ver" ]; then
             rmmod aod_voltages 2>/dev/null || true
             dkms remove aod-voltages/"$aod_ver" --all 2>/dev/null || true
         fi
 
         local tb_ver
-        tb_ver=$(dkms status tuxbench 2>/dev/null | grep -oP '(?<=tuxbench, )[0-9.]+' | head -1)
+        tb_ver=$(_dkms_ver tuxbench)
         if [ -n "$tb_ver" ]; then
             rmmod tuxbench 2>/dev/null || true
             dkms remove tuxbench/"$tb_ver" --all 2>/dev/null || true
