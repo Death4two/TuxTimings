@@ -61,7 +61,7 @@ typedef struct {
     /* CPU tab — Fans */
     GtkWidget *lbl_fans;
 
-    /* Benchmark tab */
+    /* Benchmark tab — RAM */
     GtkWidget *btn_bench_run;
     GtkWidget *lbl_bench_status;
     GtkWidget *lbl_bench_lat_l1;
@@ -71,6 +71,12 @@ typedef struct {
     GtkWidget *lbl_bench_bw_read;
     GtkWidget *lbl_bench_bw_write;
     GtkWidget *lbl_bench_bw_copy;
+
+    /* Benchmark tab — Pi */
+    GtkWidget *btn_pi_run;
+    GtkWidget *combo_pi_digits;
+    GtkWidget *lbl_pi_status;
+    GtkWidget *lbl_pi_time;
 
     /* Data */
     system_summary_t summary;

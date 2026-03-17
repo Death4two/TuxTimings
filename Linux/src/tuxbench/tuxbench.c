@@ -52,7 +52,7 @@
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("TuxTimings");
 MODULE_DESCRIPTION("Kernel-mode memory latency and bandwidth benchmark");
-MODULE_VERSION("0.1");
+MODULE_VERSION("0.2");
 
 /* ── Constants ──────────────────────────────────────────────────────────── */
 
@@ -200,6 +200,8 @@ static u64 tb_measure_latency_ps(size_t buf_bytes, long long min_iters,
 
     rng = (u64)(uintptr_t)nodes ^ (u64)ktime_get_ns();
 
+    sched_set_fifo(current);
+
     for (s = 0; s < LAT_SAMPLES; s++) {
         size_t i;
         tb_node_t *p;
@@ -220,6 +222,7 @@ static u64 tb_measure_latency_ps(size_t buf_bytes, long long min_iters,
         if (iters < 1) iters = 1;
 
         p = &nodes[0];
+        migrate_disable();
         t0 = ktime_get_ns();
         {
             u64 k;
@@ -230,6 +233,7 @@ static u64 tb_measure_latency_ps(size_t buf_bytes, long long min_iters,
             }
         }
         t1 = ktime_get_ns();
+        migrate_enable();
 
         /* prevent optimising away the pointer chase */
         WRITE_ONCE(nodes[0].pad[0], (char)(uintptr_t)p);
@@ -237,6 +241,8 @@ static u64 tb_measure_latency_ps(size_t buf_bytes, long long min_iters,
         elapsed_ns = (long long)(t1 - t0);
         samples[s] = (u64)elapsed_ns * 1000ULL / (iters * (u64)n_nodes);
     }
+
+    sched_set_normal(current, 0);
 
     kvfree(indices);
     tb_free(nodes, buf_bytes);
@@ -422,22 +428,10 @@ static void do_write_kernel(u64 *a, size_t n)
 
 static void do_copy_kernel(u64 *dst, const u64 *src, size_t n)
 {
-    size_t i;
-    u64 v0, v1, v2, v3, v4, v5, v6, v7;
-
-    for (i = 0; i + 7 < n; i += 8) {
-        v0 = src[i+0]; v1 = src[i+1]; v2 = src[i+2]; v3 = src[i+3];
-        v4 = src[i+4]; v5 = src[i+5]; v6 = src[i+6]; v7 = src[i+7];
-        asm volatile("movnti %1, %0" : "=m"(dst[i+0]) : "r"(v0));
-        asm volatile("movnti %1, %0" : "=m"(dst[i+1]) : "r"(v1));
-        asm volatile("movnti %1, %0" : "=m"(dst[i+2]) : "r"(v2));
-        asm volatile("movnti %1, %0" : "=m"(dst[i+3]) : "r"(v3));
-        asm volatile("movnti %1, %0" : "=m"(dst[i+4]) : "r"(v4));
-        asm volatile("movnti %1, %0" : "=m"(dst[i+5]) : "r"(v5));
-        asm volatile("movnti %1, %0" : "=m"(dst[i+6]) : "r"(v6));
-        asm volatile("movnti %1, %0" : "=m"(dst[i+7]) : "r"(v7));
-    }
-    asm volatile("sfence" ::: "memory");
+    size_t bytes = n * sizeof(u64);
+    asm volatile("rep movsb"
+                 : "+D"(dst), "+S"(src), "+c"(bytes)
+                 :: "memory");
 }
 
 /* ── kthread worker ──────────────────────────────────────────────────── */
@@ -568,6 +562,7 @@ static u64 tb_measure_bw(int op, int node)
             if (IS_ERR(task)) goto cleanup_threads;
             tasks[cpu_idx] = task;
             kthread_bind(task, cpu);
+            sched_set_fifo(task);
             wake_up_process(task);
             cpu_idx++;
         }

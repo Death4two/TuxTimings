@@ -982,25 +982,16 @@ static void detect_lat_buf_sizes(size_t *l1, size_t *l2, size_t *l3)
  * The kernel path gives:
  *   - wbinvd_on_all_cpus()    — single-instruction full cache flush (incl. 3D V-Cache)
  *   - alloc_pages_node()      — guaranteed physically contiguous NUMA-local pages
- *   - kthread_bind()          — hard CPU pin, no CFS preemption between timed sections
+ *   - kthread_bind()          — hard CPU pin, SCHED_FIFO RT priority
  *
- * If /dev/tuxbench is absent but the module is installed via DKMS, load it
- * on demand.  bench_unload_kmod() should be called on application exit.
+ * The module is loaded at startup by backend_read_summary() and unloaded on exit
+ * by backend_cleanup().
  */
-static int g_tuxbench_loaded = 0; /* did we modprobe it? */
-
 static int bench_run_kernel(bench_results_t *out)
 {
     int fd = open("/dev/tuxbench", O_RDWR);
-    if (fd < 0) {
-        /* Try loading the module then retry once */
-        if (system("modprobe tuxbench 2>/dev/null") == 0) {
-            g_tuxbench_loaded = 1;
-            fd = open("/dev/tuxbench", O_RDWR);
-        }
-        if (fd < 0)
-            return 0;
-    }
+    if (fd < 0)
+        return 0;
 
     struct tuxbench_req req = {
         .flags = TUXBENCH_FL_LAT | TUXBENCH_FL_BW,
@@ -1026,14 +1017,6 @@ static int bench_run_kernel(bench_results_t *out)
     return 1;
 }
 
-/* Unload tuxbench module if we loaded it.  Call on application exit. */
-void bench_unload_kmod(void)
-{
-    if (g_tuxbench_loaded) {
-        system("modprobe -r tuxbench 2>/dev/null");
-        g_tuxbench_loaded = 0;
-    }
-}
 
 void bench_run(bench_results_t *out)
 {

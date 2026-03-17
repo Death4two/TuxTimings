@@ -28,6 +28,7 @@ static void run_shell(const char *cmd) { int r = system(cmd); (void)r; }
 static int  s_cached_static = 0;
 static int  s_loaded_aod_voltages = 0;
 static int  s_loaded_ryzen_smu    = 0;
+static int  s_loaded_tuxbench     = 0;
 static char s_processor_name[STR_LEN];
 static char s_board_product[STR_LEN];
 static char s_bios_version[STR_LEN];
@@ -918,6 +919,12 @@ void backend_read_summary(system_summary_t *out)
             s_loaded_aod_voltages = 1;
         if (file_exists("/sys/kernel/ryzen_smu_drv/version"))
             s_loaded_ryzen_smu = 1;
+        if (access("/sys/module/tuxbench", F_OK) != 0) {
+            snprintf(cmd, sizeof(cmd), "%s tuxbench 2>/dev/null", mp);
+            run_shell(cmd);
+        }
+        if (access("/sys/module/tuxbench", F_OK) == 0)
+            s_loaded_tuxbench = 1;
 
         /* Load nct6775 if no Nuvoton hwmon driver is active.
          * Covers NCT6775F/6776F/6779D/6791D/6792D/6793D/
@@ -1052,6 +1059,15 @@ void backend_cleanup(void)
         s_loaded_ryzen_smu = 0;
         rmmod_module(rm, "ryzen_smu");
     }
+    if (s_loaded_tuxbench) {
+        s_loaded_tuxbench = 0;
+        rmmod_module(rm, "tuxbench");
+    }
+}
+
+void backend_set_tuxbench_loaded(void)
+{
+    s_loaded_tuxbench = 1;
 }
 
 /* ── Debug dump ─────────────────────────────────────────────────────── */

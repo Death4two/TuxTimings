@@ -1,6 +1,7 @@
 #include "ui.h"
 #include "backend.h"
 #include "bench.h"
+#include "pi_bench.h"
 #include <stdio.h>
 #include <string.h>
 #include <locale.h>
@@ -648,6 +649,58 @@ static void on_bench_run(GtkButton *btn, gpointer user_data)
     g_thread_new("bench", bench_thread, job);
 }
 
+/* ── Pi benchmark tab ───────────────────────────────────────────────── */
+
+typedef struct {
+    app_widgets_t *w;
+    pi_results_t   results;
+    int            n_digits;
+} pi_job_t;
+
+static gboolean pi_done(gpointer data)
+{
+    pi_job_t *job = data;
+    app_widgets_t *w = job->w;
+    pi_results_t *r = &job->results;
+
+    if (r->time_sec < 1.0)
+        set_label_fmt(w->lbl_pi_time, "%.1f ms", r->time_sec * 1000.0);
+    else
+        set_label_fmt(w->lbl_pi_time, "%.3f s", r->time_sec);
+
+    set_label_text(w->lbl_pi_status, "Done");
+    gtk_widget_set_sensitive(w->btn_pi_run, TRUE);
+    gtk_widget_set_sensitive(w->combo_pi_digits, TRUE);
+    free(job);
+    return G_SOURCE_REMOVE;
+}
+
+static gpointer pi_thread(gpointer data)
+{
+    pi_job_t *job = data;
+    pi_bench_run(job->n_digits, &job->results);
+    g_idle_add(pi_done, job);
+    return NULL;
+}
+
+static void on_pi_run(GtkButton *btn, gpointer user_data)
+{
+    app_widgets_t *w = user_data;
+    gtk_widget_set_sensitive(GTK_WIDGET(btn), FALSE);
+    gtk_widget_set_sensitive(w->combo_pi_digits, FALSE);
+    set_label_text(w->lbl_pi_status, "Running…");
+
+    static const int digit_counts[] = { 100000, 1000000, 10000000, 100000000 };
+    guint sel = gtk_drop_down_get_selected(GTK_DROP_DOWN(w->combo_pi_digits));
+    if (sel >= G_N_ELEMENTS(digit_counts)) sel = 1;
+
+    pi_job_t *job = malloc(sizeof(*job));
+    job->w        = w;
+    job->n_digits = digit_counts[sel];
+    memset(&job->results, 0, sizeof(job->results));
+    g_thread_new("pi", pi_thread, job);
+}
+
 static GtkWidget *build_bench_tab(app_widgets_t *w)
 {
     GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
@@ -707,6 +760,45 @@ static GtkWidget *build_bench_tab(app_widgets_t *w)
     gtk_box_append(GTK_BOX(cols), lat_box);
     gtk_box_append(GTK_BOX(cols), bw_box);
     gtk_box_append(GTK_BOX(vbox), cols);
+
+    /* ── Pi benchmark section ─────────────────────────────────────────── */
+    GtkWidget *pi_box = make_section_box();
+    gtk_widget_set_hexpand(pi_box, TRUE);
+
+    GtkWidget *pi_title = make_label("Pi Computation", "section-title");
+    gtk_box_append(GTK_BOX(pi_box), pi_title);
+
+    /* Controls: [digit dropdown] [Run Pi button] [status] */
+    GtkWidget *pi_ctrl = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    gtk_widget_set_margin_top(pi_ctrl, 4);
+
+    static const char *digit_opts[] = { "100 K digits", "1 M digits", "10 M digits", "100 M digits", NULL };
+    w->combo_pi_digits = gtk_drop_down_new_from_strings(digit_opts);
+    gtk_drop_down_set_selected(GTK_DROP_DOWN(w->combo_pi_digits), 1); /* default: 1 M */
+
+    w->btn_pi_run = gtk_button_new_with_label("Run Pi");
+    g_signal_connect(w->btn_pi_run, "clicked", G_CALLBACK(on_pi_run), w);
+
+    w->lbl_pi_status = make_label("Ready", "header-muted");
+    gtk_widget_set_valign(w->lbl_pi_status, GTK_ALIGN_CENTER);
+
+    gtk_box_append(GTK_BOX(pi_ctrl), w->combo_pi_digits);
+    gtk_box_append(GTK_BOX(pi_ctrl), w->btn_pi_run);
+    gtk_box_append(GTK_BOX(pi_ctrl), w->lbl_pi_status);
+    gtk_box_append(GTK_BOX(pi_box), pi_ctrl);
+
+    /* Results grid */
+    GtkWidget *pi_grid = gtk_grid_new();
+    gtk_grid_set_row_spacing(GTK_GRID(pi_grid), 4);
+    gtk_grid_set_column_spacing(GTK_GRID(pi_grid), 8);
+    gtk_widget_set_margin_top(pi_grid, 4);
+    {
+        int pr = 0;
+        grid_row(pi_grid, pr++, "Time:", &w->lbl_pi_time);
+    }
+    gtk_box_append(GTK_BOX(pi_box), pi_grid);
+
+    gtk_box_append(GTK_BOX(vbox), pi_box);
 
     return vbox;
 }

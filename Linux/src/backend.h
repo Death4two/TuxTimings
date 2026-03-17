@@ -13,6 +13,7 @@ void backend_read_summary(system_summary_t *out);
 /* Unload any kernel modules that were loaded by backend_read_summary().
  * Call once on application exit. */
 void backend_cleanup(void);
+void backend_set_tuxbench_loaded(void);
 
 /* Returns a malloc'd string with a raw PM table + AOD sysfs debug dump.
  * Caller must free(). Returns NULL on failure. */

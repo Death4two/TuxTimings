@@ -1,5 +1,4 @@
 obj-m := tuxbench.o
-ccflags-y := -mavx2
 
 KVER  ?= $(shell uname -r)
 KDIR  ?= /lib/modules/$(KVER)/build

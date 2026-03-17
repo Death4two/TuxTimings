@@ -441,12 +441,6 @@ install_tuxbench() {
         return 0
     fi
 
-    # Already installed?
-    if dkms status tuxbench 2>/dev/null | grep -q "installed"; then
-        echo "==> tuxbench module already installed via DKMS."
-        return 0
-    fi
-
     local TB_VER
     TB_VER=$(grep '^PACKAGE_VERSION=' "$TB_SRC/dkms.conf" | cut -d= -f2 | tr -d '"')
     echo "==> Installing tuxbench $TB_VER via DKMS..."
@@ -454,6 +448,15 @@ install_tuxbench() {
     local DKMS_SRC="/usr/src/tuxbench-$TB_VER"
     mkdir -p "$DKMS_SRC"
     cp "$TB_SRC/dkms.conf" "$TB_SRC/Makefile" "$TB_SRC"/*.c "$TB_SRC"/*.h "$DKMS_SRC/"
+
+    # Remove all versions except the current one so fresh source is always built
+    rmmod tuxbench 2>/dev/null || true
+    dkms status tuxbench 2>/dev/null | grep -oP 'tuxbench/\K[0-9.]+' | while read -r old_ver; do
+        [ "$old_ver" = "$TB_VER" ] && continue
+        dkms remove tuxbench/"$old_ver" --all 2>/dev/null || true
+        rm -rf "/usr/src/tuxbench-$old_ver"
+    done
+    dkms remove tuxbench/"$TB_VER" --all 2>/dev/null || true
 
     if dkms add tuxbench/"$TB_VER" 2>/dev/null || true; then
         if dkms build tuxbench/"$TB_VER" && dkms install tuxbench/"$TB_VER"; then
