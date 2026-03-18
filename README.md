@@ -15,9 +15,9 @@ If your CPU family is not listed or shows incomplete readings, you can help by r
   - Arch: `gtk4`  
   - Debian/Ubuntu: `libgtk-4-1`
 
-> If building manually: also install `gcc`, `make`, `pkg-config`, and GTK4 development headers.  
-> - Arch: `gtk4` (headers included)  
-> - Debian/Ubuntu: `libgtk-4-dev`
+> If building manually: also install `gcc`, `make`, `pkg-config`, GTK4 development headers, and GMP headers (Pi benchmark).  
+> - Arch: `gtk4` + `gmp`  
+> - Debian/Ubuntu: `libgtk-4-dev` + `libgmp-dev`
 
 > **Note:** TuxTimings automatically loads `ryzen_smu` and `aod_voltages` on startup and unloads them on exit. No manual `modprobe` is needed.
 
@@ -38,7 +38,12 @@ This uses the included PKGBUILD to build and install via pacman. The `aod-voltag
 
 ```bash
 sudo apt update
-sudo apt install -y build-essential pkg-config libgtk-4-dev
+
+# Runtime deps (needed to run/install the .deb)
+sudo apt install -y libgtk-4-1 libgmp10 policykit-1 dmidecode kmod
+
+# Build deps (only needed if building from source / creating the .deb)
+sudo apt install -y build-essential pkg-config libgtk-4-dev libgmp-dev
 
 cd Linux
 ./install.sh --deb

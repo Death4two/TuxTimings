@@ -151,7 +151,7 @@ Version: $PKG_VERSION
 Section: utils
 Priority: optional
 Architecture: amd64
-Depends: libgtk-4-1
+Depends: libgtk-4-1, libgmp10, policykit-1, dmidecode, kmod
 Recommends: dkms, linux-headers-generic
 Maintainer: Death4two <https://github.com/Death4two>
 Description: AMD Ryzen DRAM timings and CPU telemetry viewer (GTK4)
