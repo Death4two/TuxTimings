@@ -8,6 +8,10 @@ Zen 5 Granite Ridge (Ryzen 9000-series AM5) is the primary tested target for PM-
 
 If your CPU family is not listed or shows incomplete readings, you can help by running the **debug dump** from the app (PM table + AOD dump) and opening a GitHub issue with the dump attached so I can add proper PM table support.
 
+### Documentation
+
+- **PM table indices reference**: [`Linux/docs/PM_TABLE_INDICES.md`](Linux/docs/PM_TABLE_INDICES.md)
+
 ### Prerequisites
 
 - **[ryzen_smu](https://github.com/amkillam/ryzen_smu/)** kernel module — required for all readings. TuxTimings will load and unload it automatically if it is installed.
