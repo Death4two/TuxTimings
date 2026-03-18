@@ -197,10 +197,25 @@ static void build_module_display(memory_module_t *m, int index)
 
 static void parse_dmidecode_memory(void)
 {
-    char *out = run_command("dmidecode -t memory");
+    /* dmidecode is often in /usr/sbin which may not be in PATH under pkexec */
+    const char *cmds[] = {
+        "/usr/sbin/dmidecode -t memory",
+        "/usr/bin/dmidecode -t memory",
+        "dmidecode -t memory",
+        NULL
+    };
+    char *out = NULL;
+    for (int ci = 0; cmds[ci]; ci++) {
+        out = run_command(cmds[ci]);
+        if (out && out[0]) break;
+        if (out) { free(out); out = NULL; }
+    }
     if (!out) return;
 
-    s_module_count = 0;
+    /* Parse into a temporary list; only overwrite globals on success. */
+    memory_module_t tmp_modules[MAX_MODULES];
+    int tmp_count = 0;
+
     memory_module_t cur;
     memset(&cur, 0, sizeof(cur));
     int in_device = 0;
@@ -210,10 +225,10 @@ static void parse_dmidecode_memory(void)
     while (line) {
         if (strstr(line, "Memory Device") && !strstr(line, "Mapped")) {
             /* save previous */
-            if (in_device && cap > 0 && s_module_count < MAX_MODULES) {
+            if (in_device && cap > 0 && tmp_count < MAX_MODULES) {
                 cur.capacity_bytes = cap;
-                build_module_display(&cur, s_module_count);
-                s_modules[s_module_count++] = cur;
+                build_module_display(&cur, tmp_count);
+                tmp_modules[tmp_count++] = cur;
             }
             memset(&cur, 0, sizeof(cur));
             cap = 0;
@@ -265,12 +280,17 @@ static void parse_dmidecode_memory(void)
         line = strtok(NULL, "\n");
     }
     /* last device */
-    if (in_device && cap > 0 && s_module_count < MAX_MODULES) {
+    if (in_device && cap > 0 && tmp_count < MAX_MODULES) {
         cur.capacity_bytes = cap;
-        build_module_display(&cur, s_module_count);
-        s_modules[s_module_count++] = cur;
+        build_module_display(&cur, tmp_count);
+        tmp_modules[tmp_count++] = cur;
     }
     free(out);
+
+    if (tmp_count > 0) {
+        s_module_count = tmp_count;
+        memcpy(s_modules, tmp_modules, tmp_count * sizeof(memory_module_t));
+    }
 }
 
 /* ── AGESA version ──────────────────────────────────────────────────── */
@@ -1011,8 +1031,24 @@ void backend_read_summary(system_summary_t *out)
     /* Memory config */
     out->memory.type = mem_type_for_codename(codename_idx);
     float mem_freq = out->dram.frequency_hint_mhz;
-    if (mem_freq == 0 && out->memory.type == MEM_DDR4 && out->metrics.mclk_mhz > 0)
-        mem_freq = out->metrics.mclk_mhz;
+
+    /* dmidecode "Configured Memory Speed" (MT/s) */
+    uint32_t max_cfg = 0;
+    for (int i = 0; i < s_module_count; i++) {
+        if (s_modules[i].clock_speed_mhz > max_cfg)
+            max_cfg = s_modules[i].clock_speed_mhz;
+    }
+    if (out->memory.type == MEM_DDR4) {
+        /* For DDR4, prefer SMN-derived effective MT/s; fall back to dmidecode. */
+        if (mem_freq <= 0.0f && max_cfg > 0)
+            mem_freq = (float)max_cfg;
+    } else {
+        /* Non-DDR4: prefer timing-derived hint, else fall back to MCLK MHz. */
+        if (mem_freq == 0 && out->metrics.mclk_mhz > 0)
+            mem_freq = out->metrics.mclk_mhz;
+        else if (mem_freq <= 0.0f && max_cfg > 0)
+            mem_freq = (float)max_cfg;
+    }
     out->memory.frequency = mem_freq;
     read_total_memory(out->memory.total_capacity, sizeof(out->memory.total_capacity));
 

@@ -397,7 +397,10 @@ static void refresh_ui(app_widgets_t *w)
     int mi = w->selected_module;
 
     /* DIMM speeds */
-    set_label_fmt(w->lbl_speed, "%.0f MT/s", s->memory.frequency);
+    if (s->memory.frequency > 0.0f)
+        set_label_fmt(w->lbl_speed, "%.0f MT/s", s->memory.frequency);
+    else
+        set_label_text(w->lbl_speed, "—");
     set_label_fmt(w->lbl_mclk, "%.0f MHz", m->mclk_mhz);
     set_label_fmt(w->lbl_fclk, "%.0f MHz", m->fclk_mhz);
     set_label_fmt(w->lbl_uclk, "%.0f MHz", m->uclk_mhz);

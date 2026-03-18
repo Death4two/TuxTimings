@@ -15,7 +15,6 @@ LINUX_DIR="$ROOT_DIR/Linux"
 INSTALL_DIR="/opt/TuxTimings"
 MAKE=/usr/bin/make
 
-GITHUB_REPO="Death4two/TuxTimings"
 REAL_USER="${SUDO_USER:-$(whoami)}"
 REAL_HOME=$(getent passwd "$REAL_USER" | cut -d: -f6)
 
@@ -100,7 +99,21 @@ if [ "${1:-}" = "--deb" ]; then
         "$MAKE" -C "$LINUX_DIR" clean all
     fi
 
-    PKG_VERSION="1.0.5"
+    # Prefer a version derived from git tags when available, otherwise fall back
+    # to a stable placeholder.
+    PKG_VERSION="0.0.0"
+    if command -v git >/dev/null 2>&1 && git -C "$ROOT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        # Examples:
+        #   v1.2.3          -> 1.2.3
+        #   v1.2.3-5-g<sha> -> 1.2.3+5.g<sha>
+        ver="$(git -C "$ROOT_DIR" describe --tags --always --dirty 2>/dev/null || true)"
+        ver="${ver#v}"
+        # Debian version: allow [0-9A-Za-z.+~:-]
+        # Translate git-describe output into something dpkg accepts.
+        ver="${ver//-/.}"      # separators
+        ver="${ver//_/.}"      # safety
+        PKG_VERSION="${ver//.g/+g}"  # "…+g<sha>" instead of "…g<sha>"
+    fi
     DEB_ROOT="$LINUX_DIR/deb-build/tuxtimings_${PKG_VERSION}_amd64"
     rm -rf "$LINUX_DIR/deb-build"
     mkdir -p "$DEB_ROOT/DEBIAN"

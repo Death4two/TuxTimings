@@ -161,6 +161,23 @@ static void read_ddr4_timings(dram_timings_t *d)
 {
     const uint32_t offset = 0; /* UMC0 */
 
+    /*
+     * DDR4 frequency ratio / flags (aligned with ZenStates-Core):
+     *   - ratio: bits 0..7, scaled by /3.0, then *200 -> effective MT/s
+     *   - Cmd2T: bit 10
+     *   - GDM:   bit 11
+     */
+    uint32_t ratio_reg = read_smn(offset | 0x50200);
+    float ratio = (float)bit_slice(ratio_reg, 7, 0) / 3.0f;
+    float mem_freq = ratio * 200.0f;
+    d->frequency_hint_mhz = mem_freq;
+
+    uint32_t cmd2t_bit = bit_slice(ratio_reg, 10, 10);
+    snprintf(d->cmd2t, sizeof(d->cmd2t), "%s", cmd2t_bit ? "2T" : "1T");
+    d->gdm_enabled = bit_slice(ratio_reg, 11, 11) == 1;
+    uint32_t refresh_reg = read_smn(offset | 0x5012C);
+    d->power_down_enabled = bit_slice(refresh_reg, 28, 28) == 1;
+
     read_common_timings(offset, d);
 
     /* RFC - DDR4: first non-default from 2 registers */
@@ -172,8 +189,6 @@ static void read_ddr4_timings(dram_timings_t *d)
         d->rfc2 = bit_slice(trfc_reg, 21, 11);
     }
 
-    d->cmd2t[0] = '\0';
-    d->frequency_hint_mhz = 0;
 }
 
 void dram_read_timings(int codename_index, dram_timings_t *out)
