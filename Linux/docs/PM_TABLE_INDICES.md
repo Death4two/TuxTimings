@@ -35,29 +35,6 @@ Additional indices read by `read_known_indices` (shared with Granite Ridge path)
 
 ---
 
-### Raphael — PM table `0x00540004` (7000-series, e.g. 7950X/7900X)
-
-Same base voltage/power indices as Raphael `0x540104`, but with 16-core arrays and different UCLK/MCLK positions.
-
-| Index / Range | Field |
-| ------------- | ----- |
-| 3             | PPT |
-| 11            | IOD hotspot temp (°C) |
-| 29            | Socket power |
-| 70            | `fclk_mhz` (Infinity Fabric clock) |
-| 74            | `uclk_mhz` (Memory controller clock) |
-| 78            | `mclk_mhz` (DRAM clock) |
-| 82            | `vsoc` (SoC voltage) |
-| 259           | `vddg_iod` (VDDG IOD rail) |
-| 261           | `vddg_ccd` (VDDG CCD rail) |
-| 269           | `vddp` (VDDP rail) |
-| 271           | `vcore` (Core voltage) |
-| 275           | `vid` (Aggregate VID) |
-| 309–324       | `core_voltages[0–15]` (Per-core voltages C0–C15) |
-| 325–340       | `core_temps_c[0–15]` (Per-core temps C0–C15, °C) |
-
----
-
 ### Raphael — PM table `0x00540104` (7000-series, e.g. 7800X3D)
 
 | Index / Range | Field |
@@ -79,6 +56,17 @@ Same base voltage/power indices as Raphael `0x540104`, but with 16-core arrays a
 | 317–324       | `core_clocks_ghz[0–7]` (Per-core clocks, GHz; 8 cores) |
 
 ---
+
+### Raphael — PM table `0x00540004` (7000-series, e.g. 7950X/7900X)
+
+Same as Raphael `0x00540104` **except**:
+
+| Index / Range | Field |
+| ------------- | ----- |
+| 74            | `uclk_mhz` (Memory controller clock) |
+| 78            | `mclk_mhz` (DRAM clock) |
+| 309–324       | `core_voltages[0–15]` (Per-core voltages C0–C15) |
+| 325–340       | `core_temps_c[0–15]` (Per-core temps C0–C15, °C) |
 
 ### Vermeer — PM table `0x00380804` (5900X/5950X 16-core, older BIOS)
 
