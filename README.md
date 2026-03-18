@@ -11,9 +11,13 @@ If your CPU family is not listed or shows incomplete readings, you can help by r
 ### Prerequisites
 
 - **[ryzen_smu](https://github.com/amkillam/ryzen_smu/)** kernel module — required for all readings. TuxTimings will load and unload it automatically if it is installed.
-- **GTK4** runtime (`gtk4` / `libgtk-4-1`) — needed to run the application
+- **GTK4 runtime** — needed to run the application  
+  - Arch: `gtk4`  
+  - Debian/Ubuntu: `libgtk-4-1`
 
-> If building manually: also install `gcc`, `make`, `pkg-config`, and GTK4 development headers (`gtk4-devel` / `libgtk-4-dev`). These are handled automatically by `makepkg`.
+> If building manually: also install `gcc`, `make`, `pkg-config`, and GTK4 development headers.  
+> - Arch: `gtk4` (headers included)  
+> - Debian/Ubuntu: `libgtk-4-dev`
 
 > **Note:** TuxTimings automatically loads `ryzen_smu` and `aod_voltages` on startup and unloads them on exit. No manual `modprobe` is needed.
 
@@ -33,9 +37,12 @@ This uses the included PKGBUILD to build and install via pacman. The `aod-voltag
 #### Ubuntu / Debian
 
 ```bash
+sudo apt update
+sudo apt install -y build-essential pkg-config libgtk-4-dev
+
 cd Linux
 ./install.sh --deb
-sudo dpkg -i tuxtimings_1.0.3_amd64.deb
+sudo dpkg -i tuxtimings_1.0.5_amd64.deb
 ```
 
 #### Any Linux (direct install)
