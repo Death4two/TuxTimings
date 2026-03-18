@@ -694,9 +694,9 @@ static void on_pi_run(GtkButton *btn, gpointer user_data)
     gtk_widget_set_sensitive(w->combo_pi_digits, FALSE);
     set_label_text(w->lbl_pi_status, "Running…");
 
-    static const int digit_counts[] = { 100000, 1000000, 10000000, 100000000 };
+    static const int digit_counts[] = { 1000000, 10000000, 100000000, 200000000 };
     guint sel = gtk_drop_down_get_selected(GTK_DROP_DOWN(w->combo_pi_digits));
-    if (sel >= G_N_ELEMENTS(digit_counts)) sel = 1;
+    if (sel >= G_N_ELEMENTS(digit_counts)) sel = 0;
 
     pi_job_t *job = malloc(sizeof(*job));
     if (!job) return;
@@ -777,9 +777,9 @@ static GtkWidget *build_bench_tab(app_widgets_t *w)
     GtkWidget *pi_ctrl = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     gtk_widget_set_margin_top(pi_ctrl, 4);
 
-    static const char *digit_opts[] = { "100 K digits", "1 M digits", "10 M digits", "100 M digits", NULL };
+    static const char *digit_opts[] = { "1 M digits", "10 M digits", "100 M digits", "200 M digits", NULL };
     w->combo_pi_digits = gtk_drop_down_new_from_strings(digit_opts);
-    gtk_drop_down_set_selected(GTK_DROP_DOWN(w->combo_pi_digits), 1); /* default: 1 M */
+    gtk_drop_down_set_selected(GTK_DROP_DOWN(w->combo_pi_digits), 0); /* default: 1 M */
 
     w->btn_pi_run = gtk_button_new_with_label("Run Pi");
     g_signal_connect(w->btn_pi_run, "clicked", G_CALLBACK(on_pi_run), w);

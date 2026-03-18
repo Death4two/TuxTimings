@@ -141,8 +141,51 @@ static void *bs_queue_worker(void *arg)
         task->b = (long)(t + 1) * q->N / q->M;
         if (task->b > q->N) task->b = q->N;
 
-        mpz_inits(task->P, task->Q, task->T, NULL);
         bs(task->P, task->Q, task->T, task->a, task->b);
+    }
+    return NULL;
+}
+
+/* ── Parallel merge (tree reduction) ─────────────────────────────────── */
+
+typedef struct {
+    bs_task_t          *tasks;
+    _Atomic int         next_pair;
+    int                 M;          /* current number of valid tasks */
+    int                 shutdown;
+    pthread_barrier_t  *bar_start;
+    pthread_barrier_t  *bar_end;
+} merge_ctx_t;
+
+static void merge_pair(bs_task_t *dst, bs_task_t *a, bs_task_t *b)
+{
+    (void)a;
+    /* dst = merge(dst,b). We keep all mpz_t initialized; do not clear here. */
+    bs_merge(dst->P, dst->Q, dst->T, b->P, b->Q, b->T);
+    mpz_set_ui(b->P, 0);
+    mpz_set_ui(b->Q, 0);
+    mpz_set_ui(b->T, 0);
+}
+
+static void *merge_worker(void *arg)
+{
+    merge_ctx_t *ctx = arg;
+    for (;;) {
+        pthread_barrier_wait(ctx->bar_start);
+        if (ctx->shutdown || ctx->M <= 1) {
+            pthread_barrier_wait(ctx->bar_end);
+            break;
+        }
+
+        int pairs = ctx->M / 2;
+        int i;
+        while ((i = atomic_fetch_add(&ctx->next_pair, 1)) < pairs) {
+            int left  = 2 * i;
+            int right = left + 1;
+            merge_pair(&ctx->tasks[left], &ctx->tasks[left], &ctx->tasks[right]);
+        }
+
+        pthread_barrier_wait(ctx->bar_end);
     }
     return NULL;
 }
@@ -177,6 +220,14 @@ void pi_bench_run(int n_digits, pi_results_t *out)
     pthread_t *tids  = calloc((size_t)nthreads, sizeof(pthread_t));
     if (!tasks || !tids) { free(tasks); free(tids); return; }
 
+    /* Initialize GMP integers once (safe for swaps/sets in parallel merge). */
+    for (int i = 0; i < M; i++) {
+        mpz_inits(tasks[i].P, tasks[i].Q, tasks[i].T, NULL);
+        mpz_set_ui(tasks[i].P, 0);
+        mpz_set_ui(tasks[i].Q, 0);
+        mpz_set_ui(tasks[i].T, 0);
+    }
+
     bs_queue_t q;
     q.tasks = tasks;
     q.M     = M;
@@ -191,11 +242,78 @@ void pi_bench_run(int n_digits, pi_results_t *out)
     for (int i = 0; i < nstarted; i++)
         pthread_join(tids[i], NULL);
 
-    /* Merge all M task results in order into tasks[0] */
-    for (int i = 1; i < M; i++) {
-        bs_merge(tasks[0].P, tasks[0].Q, tasks[0].T,
-                 tasks[i].P, tasks[i].Q, tasks[i].T);
-        mpz_clears(tasks[i].P, tasks[i].Q, tasks[i].T, NULL);
+    /* Merge all M task results with a parallel tree reduction. */
+    if (M > 1 && nthreads > 1) {
+        pthread_barrier_t bar_start, bar_end;
+        pthread_barrier_init(&bar_start, NULL, (unsigned)(nthreads + 1));
+        pthread_barrier_init(&bar_end,   NULL, (unsigned)(nthreads + 1));
+
+        merge_ctx_t mctx;
+        mctx.tasks     = tasks;
+        mctx.M         = M;
+        mctx.shutdown  = 0;
+        mctx.bar_start = &bar_start;
+        mctx.bar_end   = &bar_end;
+        atomic_init(&mctx.next_pair, 0);
+
+        pthread_t *mtids = calloc((size_t)nthreads, sizeof(pthread_t));
+        int mnstarted = 0;
+        if (mtids) {
+            for (int i = 0; i < nthreads; i++) {
+                if (pthread_create(&mtids[i], NULL, merge_worker, &mctx) == 0)
+                    mnstarted++;
+            }
+        }
+
+        while (mctx.M > 1) {
+            atomic_store(&mctx.next_pair, 0);
+            pthread_barrier_wait(&bar_start);
+            pthread_barrier_wait(&bar_end);
+
+            int pairs = mctx.M / 2;
+            int newM  = pairs + (mctx.M & 1);
+
+            /* Compact: move merged results from even slots [0,2,4,...] into [0..pairs-1]. */
+            for (int i = 0; i < pairs; i++) {
+                int src = 2 * i;
+                if (i != src) {
+                    mpz_swap(tasks[i].P, tasks[src].P);
+                    mpz_swap(tasks[i].Q, tasks[src].Q);
+                    mpz_swap(tasks[i].T, tasks[src].T);
+                }
+            }
+            /* If odd: move last element into the new tail slot (index = pairs). */
+            if (mctx.M & 1) {
+                int last = mctx.M - 1;
+                int tail = pairs;
+                if (tail != last) {
+                    mpz_swap(tasks[tail].P, tasks[last].P);
+                    mpz_swap(tasks[tail].Q, tasks[last].Q);
+                    mpz_swap(tasks[tail].T, tasks[last].T);
+                }
+            }
+
+            mctx.M = newM;
+        }
+
+        /* Shut down merge workers */
+        mctx.shutdown = 1;
+        pthread_barrier_wait(&bar_start);
+        pthread_barrier_wait(&bar_end);
+        for (int i = 0; i < mnstarted; i++)
+            pthread_join(mtids[i], NULL);
+        free(mtids);
+        pthread_barrier_destroy(&bar_start);
+        pthread_barrier_destroy(&bar_end);
+    } else {
+        /* Fallback: serial merge */
+        for (int i = 1; i < M; i++) {
+            bs_merge(tasks[0].P, tasks[0].Q, tasks[0].T,
+                     tasks[i].P, tasks[i].Q, tasks[i].T);
+            mpz_set_ui(tasks[i].P, 0);
+            mpz_set_ui(tasks[i].Q, 0);
+            mpz_set_ui(tasks[i].T, 0);
+        }
     }
 
     /*
@@ -222,7 +340,8 @@ void pi_bench_run(int n_digits, pi_results_t *out)
     out->digits_per_sec = (double)n_digits / out->time_sec;
 
     mpf_clears(sqrt_part, fQ, fT, NULL);
-    mpz_clears(tasks[0].P, tasks[0].Q, tasks[0].T, NULL);
+    for (int i = 0; i < M; i++)
+        mpz_clears(tasks[i].P, tasks[i].Q, tasks[i].T, NULL);
     free(tasks);
     free(tids);
 }
