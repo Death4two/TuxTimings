@@ -134,7 +134,7 @@ if [ "$1" = "--deb" ]; then
         "$MAKE" -C "$SCRIPT_DIR" clean all
     fi
 
-    PKG_VERSION="1.0.4"
+    PKG_VERSION="1.0.5"
     DEB_ROOT="$SCRIPT_DIR/deb-build/tuxtimings_${PKG_VERSION}_amd64"
     rm -rf "$SCRIPT_DIR/deb-build"
     mkdir -p "$DEB_ROOT/DEBIAN"
