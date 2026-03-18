@@ -4,7 +4,7 @@ This file documents the PM table indices used in `Linux/src/pm_table.c`. Indices
 
 ---
 
-### Granite Ridge (codename index 23)
+### Granite Ridge 
 
 Uses **byte-offset based** reading (`read_granite_ridge_offsets`), then `read_known_indices` on top. Also the **default fallback** for any PM table version not listed below.
 
@@ -35,7 +35,7 @@ Additional indices read by `read_known_indices` (shared with Granite Ridge path)
 
 ---
 
-### Raphael 16-core — PM table `0x00540004` (7000-series, e.g. 7950X/7900X)
+### Raphael — PM table `0x00540004` (7000-series, e.g. 7950X/7900X)
 
 Same base voltage/power indices as Raphael `0x540104`, but with 16-core arrays and different UCLK/MCLK positions.
 
