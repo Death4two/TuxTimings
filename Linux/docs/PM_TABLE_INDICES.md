@@ -55,8 +55,6 @@ Additional indices read by `read_known_indices` (shared with Granite Ridge path)
 | 309–316       | `core_temps_c[0–7]` (Per-core temps C0–C7, °C) |
 | 317–324       | `core_clocks_ghz[0–7]` (Per-core clocks, GHz; 8 cores) |
 
----
-
 ### Raphael — PM table `0x00540004` (7000-series, e.g. 7950X/7900X)
 
 Same as Raphael `0x00540104` **except**:
@@ -67,6 +65,8 @@ Same as Raphael `0x00540104` **except**:
 | 78            | `mclk_mhz` (DRAM clock) |
 | 309–324       | `core_voltages[0–15]` (Per-core voltages C0–C15) |
 | 325–340       | `core_temps_c[0–15]` (Per-core temps C0–C15, °C) |
+
+---
 
 ### Vermeer — PM table `0x00380804` (5900X/5950X 16-core, older BIOS)
 
