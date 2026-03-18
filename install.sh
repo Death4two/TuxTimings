@@ -10,14 +10,19 @@
 # On Arch-based distros, prefer:  makepkg -si  (from the repo root)
 set -e
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_DIR="$(dirname "$SCRIPT_DIR")"
+ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
+LINUX_DIR="$ROOT_DIR/Linux"
 INSTALL_DIR="/opt/TuxTimings"
 MAKE=/usr/bin/make
 
 GITHUB_REPO="Death4two/TuxTimings"
 REAL_USER="${SUDO_USER:-$(whoami)}"
 REAL_HOME=$(getent passwd "$REAL_USER" | cut -d: -f6)
+
+if [ ! -f "$LINUX_DIR/Makefile" ]; then
+    echo "ERROR: Linux/Makefile not found. Run this script from the repo root."
+    exit 1
+fi
 
 # Compatible with both dkms 2.x ("name, ver,") and dkms 3.x ("name/ver:")
 _dkms_ver() {
@@ -26,7 +31,7 @@ _dkms_ver() {
 }
 
 # ── Uninstall ─────────────────────────────────────────────────────────
-if [ "$1" = "--uninstall" ]; then
+if [ "${1:-}" = "--uninstall" ]; then
     if [ "$(id -u)" -ne 0 ]; then
         exec sudo "$0" --uninstall
     fi
@@ -84,59 +89,20 @@ if [ "$1" = "--uninstall" ]; then
     exit 0
 fi
 
-# ── Check for updates ─────────────────────────────────────────────────
-check_for_update() {
-    if ! command -v git &>/dev/null; then
-        return
-    fi
-    if ! git -C "$SCRIPT_DIR" rev-parse --is-inside-work-tree &>/dev/null; then
-        return
-    fi
-
-    echo "==> Checking for updates..."
-    local LOCAL_HEAD
-    LOCAL_HEAD=$(git -C "$SCRIPT_DIR" rev-parse HEAD 2>/dev/null) || return
-    git -C "$SCRIPT_DIR" fetch origin main --quiet 2>/dev/null || return
-    local REMOTE_HEAD
-    REMOTE_HEAD=$(git -C "$SCRIPT_DIR" rev-parse origin/main 2>/dev/null) || return
-
-    if [ "$LOCAL_HEAD" != "$REMOTE_HEAD" ]; then
-        echo "==> A newer version is available."
-        read -rp "    Update now? [Y/n] " answer
-        case "$answer" in
-            [nN]*) echo "    Skipping update." ;;
-            *)
-                echo "==> Pulling latest changes..."
-                if [ "$(id -u)" -eq 0 ]; then
-                    su "$REAL_USER" -c "git -C '$SCRIPT_DIR' pull --ff-only origin main"
-                else
-                    git -C "$SCRIPT_DIR" pull --ff-only origin main
-                fi
-                echo "==> Updated. Restarting install..."
-                exec "$0" "$@"
-                ;;
-        esac
-    else
-        echo "    Already up to date."
-    fi
-}
-
-check_for_update "$@"
-
 # ── Build .deb package ────────────────────────────────────────────────
-if [ "$1" = "--deb" ]; then
+if [ "${1:-}" = "--deb" ]; then
     echo "==> Building .deb package..."
 
     # Build binary first
     if [ "$(id -u)" -eq 0 ]; then
-        su "$REAL_USER" -c "'$MAKE' -C '$SCRIPT_DIR' clean all"
+        su "$REAL_USER" -c "'$MAKE' -C '$LINUX_DIR' clean all"
     else
-        "$MAKE" -C "$SCRIPT_DIR" clean all
+        "$MAKE" -C "$LINUX_DIR" clean all
     fi
 
     PKG_VERSION="1.0.5"
-    DEB_ROOT="$SCRIPT_DIR/deb-build/tuxtimings_${PKG_VERSION}_amd64"
-    rm -rf "$SCRIPT_DIR/deb-build"
+    DEB_ROOT="$LINUX_DIR/deb-build/tuxtimings_${PKG_VERSION}_amd64"
+    rm -rf "$LINUX_DIR/deb-build"
     mkdir -p "$DEB_ROOT/DEBIAN"
     mkdir -p "$DEB_ROOT/opt/TuxTimings/bin"
     mkdir -p "$DEB_ROOT/usr/bin"
@@ -160,7 +126,7 @@ Description: AMD Ryzen DRAM timings and CPU telemetry viewer (GTK4)
 EOF
 
     # Binary
-    install -m755 "$SCRIPT_DIR/tuxtimings" "$DEB_ROOT/opt/TuxTimings/bin/tuxtimings"
+    install -m755 "$LINUX_DIR/tuxtimings" "$DEB_ROOT/opt/TuxTimings/bin/tuxtimings"
 
     # Launcher script
     cat > "$DEB_ROOT/usr/bin/tuxtimings" << 'LAUNCHER'
@@ -213,14 +179,14 @@ Categories=Utility;
 DESKTOP
 
     # Icon
-    if [ -f "$SCRIPT_DIR/tuxtimings.png" ]; then
-        install -m644 "$SCRIPT_DIR/tuxtimings.png" "$DEB_ROOT/usr/share/icons/hicolor/256x256/apps/tuxtimings.png"
+    if [ -f "$LINUX_DIR/tuxtimings.png" ]; then
+        install -m644 "$LINUX_DIR/tuxtimings.png" "$DEB_ROOT/usr/share/icons/hicolor/256x256/apps/tuxtimings.png"
     fi
 
     dpkg-deb --build "$DEB_ROOT"
-    mv "$DEB_ROOT.deb" "$SCRIPT_DIR/"
-    rm -rf "$SCRIPT_DIR/deb-build"
-    echo "==> .deb package created: $SCRIPT_DIR/tuxtimings_${PKG_VERSION}_amd64.deb"
+    mv "$DEB_ROOT.deb" "$ROOT_DIR/"
+    rm -rf "$LINUX_DIR/deb-build"
+    echo "==> .deb package created: $ROOT_DIR/tuxtimings_${PKG_VERSION}_amd64.deb"
     echo "    Install with: sudo dpkg -i tuxtimings_${PKG_VERSION}_amd64.deb"
     exit 0
 fi
@@ -229,7 +195,7 @@ fi
 
 # When re-invoked with sudo for installation, skip build
 INSTALL_ONLY=0
-if [ "$1" = "--install-only" ]; then
+if [ "${1:-}" = "--install-only" ]; then
     INSTALL_ONLY=1
     shift
 fi
@@ -238,9 +204,9 @@ if [ "$INSTALL_ONLY" -eq 0 ]; then
 
 echo "==> Building tuxtimings (C/GTK4)..."
 if [ "$(id -u)" -eq 0 ]; then
-    su "$REAL_USER" -c "'$MAKE' -C '$SCRIPT_DIR' clean all"
+    su "$REAL_USER" -c "'$MAKE' -C '$LINUX_DIR' clean all"
 else
-    "$MAKE" -C "$SCRIPT_DIR" clean all
+    "$MAKE" -C "$LINUX_DIR" clean all
 fi
 
 fi # end INSTALL_ONLY check
@@ -256,7 +222,7 @@ echo "==> Installing TuxTimings to system..."
 
 # Binary
 mkdir -p "$INSTALL_DIR/bin"
-cp "$SCRIPT_DIR/tuxtimings" "$INSTALL_DIR/bin/"
+cp "$LINUX_DIR/tuxtimings" "$INSTALL_DIR/bin/"
 chmod +x "$INSTALL_DIR/bin/tuxtimings"
 
 # Launcher script in PATH
@@ -321,66 +287,29 @@ if [ -d "$DESKTOP_DIR" ]; then
 fi
 
 # Icon
-if [ -f "$SCRIPT_DIR/tuxtimings.png" ]; then
+if [ -f "$LINUX_DIR/tuxtimings.png" ]; then
     mkdir -p /usr/share/icons/hicolor/256x256/apps
-    cp "$SCRIPT_DIR/tuxtimings.png" /usr/share/icons/hicolor/256x256/apps/
+    cp "$LINUX_DIR/tuxtimings.png" /usr/share/icons/hicolor/256x256/apps/
     gtk-update-icon-cache /usr/share/icons/hicolor/ 2>/dev/null || true
 fi
 
 # ── ryzen_smu kernel module ──────────────────────────────────────────
-install_ryzen_smu() {
-    local SMU_SRC="$REPO_DIR/ryzen_smu-src"
-    local SMU_VER
-
-    # Check if already loaded or installed as DKMS module
-    if modprobe ryzen_smu 2>/dev/null; then
-        echo "==> ryzen_smu module already available and loaded."
-        return 0
-    fi
-
-    echo "==> ryzen_smu kernel module not found."
-
-    # Need dkms and kernel headers
-    if ! command -v dkms &>/dev/null; then
-        echo "    WARNING: dkms not found. Install dkms and linux-headers to build ryzen_smu."
-        echo "      Arch:   pacman -S dkms linux-headers"
-        echo "      Ubuntu: apt install dkms linux-headers-\$(uname -r)"
-        return 1
-    fi
-
-    # Clone if source not present
-    if [ ! -d "$SMU_SRC" ]; then
-        echo "==> Cloning ryzen_smu source..."
-        if ! su "$REAL_USER" -c "git clone https://github.com/amkillam/ryzen_smu '$SMU_SRC'" 2>/dev/null; then
-            echo "    WARNING: Failed to clone ryzen_smu. Install it manually:"
-            echo "      https://github.com/amkillam/ryzen_smu"
-            return 1
-        fi
-    fi
-
-    SMU_VER=$(grep '^VERSION' "$SMU_SRC/Makefile" | head -1 | awk '{print $NF}')
-    SMU_VER=${SMU_VER:-0.1.7}
-
-    echo "==> Installing ryzen_smu $SMU_VER via DKMS..."
-    local DKMS_SRC="/usr/src/ryzen_smu-$SMU_VER"
-    mkdir -p "$DKMS_SRC"
-    cp "$SMU_SRC/dkms.conf" "$SMU_SRC/Makefile" "$SMU_SRC"/*.c "$SMU_SRC"/*.h "$DKMS_SRC/"
-
-    if dkms add ryzen_smu/"$SMU_VER" 2>/dev/null || true; then
-        if dkms build ryzen_smu/"$SMU_VER" && dkms install ryzen_smu/"$SMU_VER"; then
-            modprobe ryzen_smu && echo "==> ryzen_smu loaded successfully." || true
-        else
-            echo "    WARNING: DKMS build failed. Check kernel headers are installed."
-            return 1
-        fi
-    fi
-}
-
-install_ryzen_smu || true
+# TuxTimings requires ryzen_smu for PM-table/SMN readings, but ryzen_smu is a
+# separate project and is not bundled/installed by this script.
+if modprobe ryzen_smu 2>/dev/null; then
+    echo "==> ryzen_smu module available."
+else
+    echo "==> WARNING: ryzen_smu kernel module not found."
+    echo "    TuxTimings will have missing readings until you install it."
+    echo ""
+    echo "    Install it manually:"
+    echo "      Arch:   yay -S ryzen_smu-dkms-git"
+    echo "      Source: https://github.com/amkillam/ryzen_smu"
+fi
 
 # ── aod-voltages kernel module ────────────────────────────────────────
 install_aod_voltages() {
-    local AOD_SRC="$SCRIPT_DIR/src/aod-voltages"
+    local AOD_SRC="$LINUX_DIR/src/aod-voltages"
 
     if [ ! -d "$AOD_SRC" ]; then
         echo "    WARNING: aod-voltages source not found at $AOD_SRC, skipping."
@@ -420,7 +349,7 @@ install_aod_voltages || true
 
 # ── tuxbench kernel module ────────────────────────────────────────────
 install_tuxbench() {
-    local TB_SRC="$SCRIPT_DIR/src/tuxbench"
+    local TB_SRC="$LINUX_DIR/src/tuxbench"
 
     if [ ! -d "$TB_SRC" ]; then
         echo "    WARNING: tuxbench source not found at $TB_SRC, skipping."
@@ -495,3 +424,4 @@ echo "    Policy:    /usr/share/polkit-1/actions/com.tuxtimings.policy"
 echo "    Desktop:   /usr/share/applications/tuxtimings.desktop"
 echo ""
 echo "    Run with:  tuxtimings"
+

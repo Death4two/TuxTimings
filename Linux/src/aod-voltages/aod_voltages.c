@@ -27,10 +27,18 @@
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("TuxTimings");
 MODULE_DESCRIPTION("AMD AOD memory voltage reader");
-MODULE_VERSION("0.2");
+MODULE_VERSION("0.3");
 
-/* AOD SSDT OEM table ID (space-padded to 8 bytes) */
-#define AOD_OEM_ID   "AOD     "
+/*
+ * Some vendors/AGESA revisions ship the AOD SSDT under different OEM Table IDs.
+ * ZenStates-Core recognizes at least:
+ *   - "AOD     "
+ *   - "AMD AOD"
+ *   - "CB-01   " (Lenovo)
+ *
+ * We do not hard-filter by OEM Table ID anymore; we scan SSDTs for the AOD
+ * OperationRegion signatures directly (AODE/AODT).
+ */
 
 /*
  * Layout of the AODE OperationRegion (from SSDT9 Field definition):
@@ -65,14 +73,16 @@ MODULE_VERSION("0.2");
 #define MV_MAX   2100U
 
 /*
- * AML byte pattern for:  OpRegion (AODE, SystemMemory, ...)
+ * AML byte patterns for:
+ *   OpRegion (AODE, SystemMemory, ...)
+ *   OpRegion (AODT, SystemMemory, ...)
+ *
  *   5B 80        — DefOpRegion opcode
- *   41 4F 44 45  — NameSeg 'AODE'
+ *   41 4F 44 45  — NameSeg 'AODE' (or 'AODT')
  *   00           — RegionSpace = SystemMemory
  */
-static const u8 aode_pattern[] = {
-    0x5B, 0x80, 0x41, 0x4F, 0x44, 0x45, 0x00
-};
+static const u8 aode_pattern[] = { 0x5B, 0x80, 0x41, 0x4F, 0x44, 0x45, 0x00 };
+static const u8 aodt_pattern[] = { 0x5B, 0x80, 0x41, 0x4F, 0x44, 0x54, 0x00 };
 
 static void *aod_base;          /* remapped AOD region          */
 static struct kobject *aod_kobj;
@@ -233,9 +243,12 @@ static struct attribute *aod_attrs[] = {
 static struct attribute_group aod_attr_group = { .attrs = aod_attrs };
 
 /*
- * Parse all SSDT tables for the one with OEM table ID "AOD     ",
- * then scan its AML for the DefOpRegion AODE SystemMemory pattern and
- * extract the physical address.
+ * Scan SSDT tables for an AOD OperationRegion:
+ *   - AODE (common)
+ *   - AODT (seen on some platforms, matching ZenStates-Core behavior)
+ *
+ * We look specifically for SystemMemory OperationRegions and only handle
+ * constant addresses (DWordConst/QWordConst).
  */
 static phys_addr_t find_aod_phys(void)
 {
@@ -251,11 +264,6 @@ static phys_addr_t find_aod_phys(void)
         if (ACPI_FAILURE(status))
             break;
 
-        if (memcmp(hdr->oem_table_id, AOD_OEM_ID, 8) != 0) {
-            acpi_put_table(hdr);
-            continue;
-        }
-
         aml     = (u8 *)hdr + sizeof(*hdr);
         aml_len = hdr->length - (u32)sizeof(*hdr);
 
@@ -263,7 +271,8 @@ static phys_addr_t find_aod_phys(void)
             phys_addr_t addr = 0;
             u8 enc;
 
-            if (memcmp(aml + i, aode_pattern, sizeof(aode_pattern)) != 0)
+            if (memcmp(aml + i, aode_pattern, sizeof(aode_pattern)) != 0 &&
+                memcmp(aml + i, aodt_pattern, sizeof(aodt_pattern)) != 0)
                 continue;
 
             enc = aml[i + sizeof(aode_pattern)];
@@ -280,13 +289,12 @@ static phys_addr_t find_aod_phys(void)
                 continue;
             }
 
-            pr_info("aod_voltages: AODE region phys=0x%llx size=0x%x\n",
+            pr_info("aod_voltages: AOD region phys=0x%llx size=0x%x\n",
                     (unsigned long long)addr, AOD_REGION_SIZE);
             acpi_put_table(hdr);
             return addr;
         }
 
-        pr_warn("aod_voltages: found AOD SSDT but no AODE OpRegion pattern\n");
         acpi_put_table(hdr);
     }
 
@@ -298,7 +306,7 @@ static int __init aod_voltages_init(void)
     phys_addr_t phys = find_aod_phys();
 
     if (!phys) {
-        pr_err("aod_voltages: AOD SSDT / AODE region not found\n");
+        pr_err("aod_voltages: AOD ACPI region (AODE/AODT) not found\n");
         return -ENODEV;
     }
 

@@ -14,7 +14,7 @@ If your CPU family is not listed or shows incomplete readings, you can help by r
 
 ### Prerequisites
 
-- **[ryzen_smu](https://github.com/amkillam/ryzen_smu/)** kernel module — required for all readings. TuxTimings will load and unload it automatically if it is installed.
+- **[ryzen_smu](https://github.com/amkillam/ryzen_smu/)** kernel module — required for all readings. Install it separately; TuxTimings will load/unload it automatically if present.
 - **GTK4 runtime** — needed to run the application  
   - Arch: `gtk4`  
   - Debian/Ubuntu: `libgtk-4-1`
@@ -49,15 +49,13 @@ sudo apt install -y libgtk-4-1 libgmp10 policykit-1 dmidecode kmod
 # Build deps (only needed if building from source / creating the .deb)
 sudo apt install -y build-essential pkg-config libgtk-4-dev libgmp-dev
 
-cd Linux
 ./install.sh --deb
-sudo dpkg -i tuxtimings_1.0.5_amd64.deb
+sudo apt install ./tuxtimings_*.deb
 ```
 
 #### Any Linux (direct install)
 
 ```bash
-cd Linux
 ./install.sh
 ```
 
@@ -66,16 +64,34 @@ Builds from source and installs to `/opt/TuxTimings/` with a launcher at `/usr/b
 #### Uninstall (direct install)
 
 ```bash
-cd Linux
 ./install.sh --uninstall
 ```
+
+### Updating
+
+#### From a git clone (recommended)
+
+Update your local clone to the latest `main`, then rebuild/reinstall:
+
+```bash
+./update.sh
+./install.sh          # or: ./install.sh --deb
+```
+
+Notes:
+- `./update.sh` force-updates tracked repo files to match the latest `origin/main` (overwrites local edits).
+- By default it also removes untracked files/dirs (build artifacts, local `.deb` output, etc).
+- Add `--keep-untracked` to preserve untracked files/dirs.
+
+#### Stable builds (tags / releases)
+
+For a reproducible/stable build, download the source files from the latest stable release.
 
 ### Building without installing
 
 ```bash
-cd Linux
-make
-sudo ./tuxtimings
+make -C Linux
+sudo ./Linux/tuxtimings
 ```
 
 ### License
