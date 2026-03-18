@@ -185,6 +185,13 @@ void dram_read_timings(int codename_index, dram_timings_t *out)
     case 23:          /* Granite Ridge (Ryzen 9000) — Zen5 DDR5 */
         read_ddr5_timings(out);
         break;
+    case 2:  /* Renoir (APU, DDR4/LPDDR4) */
+    case 3:  /* Picasso (APU, DDR4) */
+    case 7:  /* Raven Ridge (APU, DDR4) */
+    case 8:  /* Raven Ridge 2 (APU, DDR4) */
+    case 14: /* Cezanne (APU, DDR4) */
+    case 16: /* Dali (APU, DDR4) */
+    case 17: /* Lucienne (APU, DDR4/LPDDR4) */
     case 4: case 9: case 10: case 12: case 18: case 19:
         /* Matisse, Summit, Pinnacle, Vermeer, Naples, Chagall (DDR4) */
         read_ddr4_timings(out);
